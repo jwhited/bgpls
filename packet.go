@@ -23,7 +23,7 @@ func prependHeader(b []byte, t MessageType) []byte {
 	return buff
 }
 
-// MessageType describes the type of bgp message
+// MessageType describes the type of bgp message.
 type MessageType uint8
 
 // MessageType values
@@ -49,7 +49,7 @@ func (t MessageType) String() string {
 	}
 }
 
-// Message is a bgp message
+// Message is a bgp message.
 type Message interface {
 	MessageType() MessageType
 	serialize() ([]byte, error)

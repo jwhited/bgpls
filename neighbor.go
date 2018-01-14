@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// NeighborConfig is the configuration for a BGP-LS neighbor
+// NeighborConfig is the configuration for a BGP-LS neighbor.
 type NeighborConfig struct {
 	Address  net.IP
 	ASN      uint32

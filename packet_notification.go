@@ -2,7 +2,7 @@ package bgpls
 
 import "errors"
 
-// NotifErrCode is a notifcation message error code
+// NotifErrCode is a notifcation message error code.
 type NotifErrCode uint8
 
 // NotifErrCode values
@@ -16,7 +16,7 @@ const (
 	NotifErrCodeCease
 )
 
-// NotifErrSubcode is a notification message error subcode
+// NotifErrSubcode is a notification message error subcode.
 type NotifErrSubcode uint8
 
 // message header subcodes
@@ -55,14 +55,16 @@ const (
 	NotifErrSubcodeMalformedAsPath
 )
 
-// NotificationMessage is a bgp message
+// NotificationMessage is a bgp message.
+//
+// https://tools.ietf.org/html/rfc4271#section-4.5
 type NotificationMessage struct {
 	Code    NotifErrCode
 	Subcode NotifErrSubcode
 	Data    []byte
 }
 
-// MessageType returns the appropriate MessageType for NotificationMessage
+// MessageType returns the appropriate MessageType for NotificationMessage.
 func (n *NotificationMessage) MessageType() MessageType {
 	return NotificationMessageType
 }

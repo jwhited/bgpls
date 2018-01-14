@@ -2,7 +2,13 @@ package bgpls
 
 import "time"
 
-// Event is a Collector event associated with a neighbor
+// Event is a Collector event associated with a neighbor.
+//
+// Neighbor() returns the associated neighbor's configuration.
+//
+// Timestamp() returns the time at which the event occurred.
+//
+// Type() returns the event type.
 type Event interface {
 	Neighbor() *NeighborConfig
 	Timestamp() time.Time
