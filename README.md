@@ -1,6 +1,8 @@
 # bgpls
 A BGP Link-State collector library in Go. Note that the API is subject to change.
 
+Documentation: [https://godoc.org/github.com/jwhited/bgpls](https://godoc.org/github.com/jwhited/bgpls)
+
 ## Supported RFCs
 [RFC7752](https://tools.ietf.org/html/rfc7752)
 
