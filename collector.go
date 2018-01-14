@@ -12,17 +12,17 @@ var ErrCollectorStopped = errors.New("collector is stopped")
 // Collector is a BGP Link-State collector
 type Collector interface {
 	Events() (<-chan Event, error)
-	Config() CollectorConfig
-	AddNeighbor(c NeighborConfig) error
+	Config() *CollectorConfig
+	AddNeighbor(c *NeighborConfig) error
 	DeleteNeighbor(address net.IP) error
-	Neighbors() ([]NeighborConfig, error)
+	Neighbors() ([]*NeighborConfig, error)
 	Stop()
 }
 
 type standardCollector struct {
 	running   bool
 	events    chan Event
-	config    CollectorConfig
+	config    *CollectorConfig
 	neighbors map[string]neighbor
 	*sync.RWMutex
 }
@@ -36,7 +36,7 @@ type CollectorConfig struct {
 }
 
 // NewCollector creates a Collector
-func NewCollector(config CollectorConfig) (Collector, error) {
+func NewCollector(config *CollectorConfig) (Collector, error) {
 	c := &standardCollector{
 		running:   true,
 		events:    make(chan Event, config.EventBufferSize),
@@ -60,15 +60,15 @@ func (c *standardCollector) Events() (<-chan Event, error) {
 }
 
 // Config returns the configuration of the Collector
-func (c *standardCollector) Config() CollectorConfig {
+func (c *standardCollector) Config() *CollectorConfig {
 	c.RLock()
 	defer c.RUnlock()
 	return c.config
 }
 
-// AddNeighbor initializes a new BGP-LS neighbor
-// an error is returned if the collector is stopped or the neighbor already exists
-func (c *standardCollector) AddNeighbor(config NeighborConfig) error {
+// AddNeighbor initializes a new BGP-LS neighbor.
+// An error is returned if the collector is stopped or the neighbor already exists
+func (c *standardCollector) AddNeighbor(config *NeighborConfig) error {
 	c.Lock()
 	defer c.Unlock()
 
@@ -95,7 +95,7 @@ func (c *standardCollector) AddNeighbor(config NeighborConfig) error {
 }
 
 // Neighbors returns the configuration of all neighbors
-func (c *standardCollector) Neighbors() ([]NeighborConfig, error) {
+func (c *standardCollector) Neighbors() ([]*NeighborConfig, error) {
 	c.RLock()
 	defer c.RUnlock()
 
@@ -103,7 +103,7 @@ func (c *standardCollector) Neighbors() ([]NeighborConfig, error) {
 		return nil, ErrCollectorStopped
 	}
 
-	configs := make([]NeighborConfig, 0)
+	configs := make([]*NeighborConfig, 0)
 	for _, n := range c.neighbors {
 		configs = append(configs, n.config())
 	}
@@ -111,8 +111,8 @@ func (c *standardCollector) Neighbors() ([]NeighborConfig, error) {
 	return configs, nil
 }
 
-// DeleteNeighbor shuts down and removes a neighbor from the collector
-// an error is returned if the collector is stopped or the neighbor does not exist
+// DeleteNeighbor shuts down and removes a neighbor from the collector.
+// An error is returned if the collector is stopped or the neighbor does not exist
 func (c *standardCollector) DeleteNeighbor(address net.IP) error {
 	c.Lock()
 	defer c.Unlock()

@@ -298,45 +298,57 @@ func (f *standardFSM) read() {
 				select {
 				case f.readerErr <- err:
 				case <-f.closeReader:
-					return
 				}
+				return
 			}
 			buff = buff[:n]
 
 			for {
 				if len(buff) < 19 {
-					select {
-					case f.readerErr <- errors.New("received message < 19 bytes"):
-					case <-f.closeReader:
-						return
+					err := &errWithNotification{
+						error:   errors.New("received message < 19 bytes"),
+						code:    NotifErrCodeMessageHeader,
+						subcode: NotifErrSubcodeBadLength,
 					}
 
-					f.sendNotification(NotifErrCodeMessageHeader, NotifErrSubcodeBadLength, nil)
+					select {
+					case f.readerErr <- err:
+					case <-f.closeReader:
+					}
+
 					return
 				}
 
 				for i := 0; i < 16; i++ {
 					if buff[i] != 0xFF {
-						select {
-						case f.readerErr <- errors.New("invalid message header marker value"):
-						case <-f.closeReader:
-							return
+						err := &errWithNotification{
+							error:   errors.New("invalid message header marker value"),
+							code:    NotifErrCodeMessageHeader,
+							subcode: NotifErrSubcodeConnNotSynch,
 						}
 
-						f.sendNotification(NotifErrCodeMessageHeader, NotifErrSubcodeConnNotSynch, nil)
+						select {
+						case f.readerErr <- err:
+						case <-f.closeReader:
+						}
+
 						return
 					}
 				}
 
 				msgLen := binary.BigEndian.Uint16(buff[16:18])
 				if len(buff) < int(msgLen) {
-					select {
-					case f.readerErr <- errors.New("message header length invalid"):
-					case <-f.closeReader:
-						return
+					err := &errWithNotification{
+						error:   errors.New("message header length invalid"),
+						code:    NotifErrCodeMessageHeader,
+						subcode: NotifErrSubcodeBadLength,
 					}
 
-					f.sendNotification(NotifErrCodeMessageHeader, NotifErrSubcodeBadLength, buff[16:18])
+					select {
+					case f.readerErr <- err:
+					case <-f.closeReader:
+					}
+
 					return
 				}
 
@@ -346,14 +358,10 @@ func (f *standardFSM) read() {
 				msg, err := messageFromBytes(msgType, msgBytes)
 				if err != nil {
 					select {
-					case f.readerErr <- fmt.Errorf("error deserializing message: %v, err: %v", msgType, err):
+					case f.readerErr <- err:
 					case <-f.closeReader:
-						return
 					}
 
-					if err, ok := err.(*errWithNotification); ok {
-						f.sendNotification(err.code, err.subcode, err.data)
-					}
 					return
 				}
 
@@ -388,6 +396,10 @@ func (f *standardFSM) openSent() FSMState {
 		f.cleanupConn()
 		return DisabledState
 	case err := <-f.readerErr:
+		if err, ok := err.(*errWithNotification); ok {
+			f.sendNotification(err.code, err.subcode, err.data)
+		}
+
 		event := newEventNeighborErr(f.neighbor.config(), err)
 		select {
 		case f.events <- event:
@@ -492,6 +504,10 @@ func (f *standardFSM) openConfirm() FSMState {
 			f.cleanupConn()
 			return DisabledState
 		case err := <-f.readerErr:
+			if err, ok := err.(*errWithNotification); ok {
+				f.sendNotification(err.code, err.subcode, err.data)
+			}
+
 			event := newEventNeighborErr(f.neighbor.config(), err)
 			select {
 			case f.events <- event:
@@ -551,6 +567,10 @@ func (f *standardFSM) established() FSMState {
 			f.cleanupConn()
 			return DisabledState
 		case err := <-f.readerErr:
+			if err, ok := err.(*errWithNotification); ok {
+				f.sendNotification(err.code, err.subcode, err.data)
+			}
+
 			event := newEventNeighborErr(f.neighbor.config(), err)
 			select {
 			case f.events <- event:
@@ -646,12 +666,10 @@ func (f *standardFSM) established() FSMState {
 
 func (f *standardFSM) loop() {
 	for {
-		f.RLock()
-		state := f.s
-		f.RUnlock()
+		state := f.state()
 
 		if state != DisabledState {
-			event := newEventNeighborStateTransition(f.neighbor.config(), f.s)
+			event := newEventNeighborStateTransition(f.neighbor.config(), state)
 			select {
 			case f.events <- event:
 			case <-f.disable:
