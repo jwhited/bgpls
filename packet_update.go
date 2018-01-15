@@ -1565,9 +1565,48 @@ func (p *PathAttrMpUnreach) deserialize(f PathAttrFlags, b []byte) error {
 	return nil
 }
 
-// TODO: serialize PathAttrMpUnreach
 func (p *PathAttrMpUnreach) serialize() ([]byte, error) {
-	return nil, nil
+	p.f = PathAttrFlags{
+		Optional: true,
+	}
+
+	nlri, err := p.NLRI.serialize()
+	if err != nil {
+		return nil, err
+	}
+
+	// prepend safi and afi
+	nlri = append([]byte{byte(p.SAFI)}, nlri...)
+	afi := make([]byte, 2)
+	binary.BigEndian.PutUint16(afi, uint16(p.AFI))
+	nlri = append(afi, nlri...)
+
+	if len(nlri) > math.MaxUint8 {
+		p.f.ExtendedLength = true
+	}
+	flags, err := p.f.serialize()
+	if err != nil {
+		return nil, err
+	}
+	if len(flags) != 1 {
+		return nil, errors.New("invalid path attr flags length")
+	}
+
+	b := make([]byte, 2)
+	b[0] = flags[0]
+	b[1] = byte(PathAttrMpUnreachType)
+
+	if p.f.ExtendedLength {
+		attrLen := make([]byte, 2)
+		binary.BigEndian.PutUint16(attrLen, uint16(len(nlri)))
+		b = append(b, attrLen...)
+	} else {
+		b = append(b, []byte{uint8(len(nlri))}...)
+	}
+
+	b = append(b, nlri...)
+
+	return b, nil
 }
 
 // Flags returns the PathAttrFlags for PathAttrMpUnreach.
@@ -1587,6 +1626,7 @@ type NLRI interface {
 	AFI() MultiprotoAFI
 	SAFI() MultiprotoSAFI
 	deserialize(b []byte) error
+	serialize() ([]byte, error)
 }
 
 // NLRIUnknown is an unknown type of nlri.
@@ -1604,6 +1644,11 @@ func (n *NLRIUnknown) AFI() MultiprotoAFI {
 // SAFI returns the subsequent address family id for NLRIUnknown.
 func (n *NLRIUnknown) SAFI() MultiprotoSAFI {
 	return n.s
+}
+
+// TODO: serialize NLRIUnknown
+func (n *NLRIUnknown) serialize() ([]byte, error) {
+	return nil, nil
 }
 
 func (n *NLRIUnknown) deserialize(b []byte) error {
@@ -1628,6 +1673,11 @@ func (ls *NLRILinkState) AFI() MultiprotoAFI {
 // SAFI returns the subsequent address family id for NLRILinkState.
 func (ls *NLRILinkState) SAFI() MultiprotoSAFI {
 	return BgpLsSAFI
+}
+
+// TODO: serialize NLRILinkState
+func (ls *NLRILinkState) serialize() ([]byte, error) {
+	return nil, nil
 }
 
 func (ls *NLRILinkState) deserialize(b []byte) error {
