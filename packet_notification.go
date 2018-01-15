@@ -77,6 +77,8 @@ func (n *NotificationMessage) serialize() ([]byte, error) {
 		buff = append(buff, n.Data...)
 	}
 
+	buff = prependHeader(buff, NotificationMessageType)
+
 	return buff, nil
 }
 
