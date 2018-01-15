@@ -86,7 +86,7 @@ func ExampleCollector() {
 			}
 
 			if addr != nil {
-				log.Printf("link: %s maxBW: %f maxReservableBW: %f unreservedBW: %f", addr, maxLinkBW, maxReservableLinkBW, reservedBW)
+				log.Printf("link: %s maxBW: %f maxReservableBW: %f reservedBW: %f", addr, maxLinkBW, maxReservableLinkBW, reservedBW)
 			}
 		}
 	}
