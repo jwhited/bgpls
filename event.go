@@ -2,9 +2,15 @@ package bgpls
 
 import "time"
 
-// Event is a Collector event associated with a neighbor
+// Event is a Collector event associated with a neighbor.
+//
+// Neighbor() returns the associated neighbor's configuration.
+//
+// Timestamp() returns the time at which the event occurred.
+//
+// Type() returns the event type.
 type Event interface {
-	Neighbor() NeighborConfig
+	Neighbor() *NeighborConfig
 	Timestamp() time.Time
 	Type() EventType
 }
@@ -48,7 +54,7 @@ func (e EventType) String() string {
 // BaseEvent is included in every Event
 type BaseEvent struct {
 	t time.Time
-	n NeighborConfig
+	n *NeighborConfig
 }
 
 // Timestamp returns the time at which the event occurred
@@ -57,7 +63,7 @@ func (b *BaseEvent) Timestamp() time.Time {
 }
 
 // Neighbor returns the NeighborConfig associated with the event
-func (b *BaseEvent) Neighbor() NeighborConfig {
+func (b *BaseEvent) Neighbor() *NeighborConfig {
 	return b.n
 }
 
@@ -71,7 +77,7 @@ func (e *EventNeighborAdded) Type() EventType {
 	return EventTypeNeighborAdded
 }
 
-func newEventNeighborAdded(c NeighborConfig) Event {
+func newEventNeighborAdded(c *NeighborConfig) Event {
 	return &EventNeighborAdded{
 		BaseEvent: BaseEvent{
 			t: time.Now(),
@@ -90,7 +96,7 @@ func (e *EventNeighborRemoved) Type() EventType {
 	return EventTypeNeighborRemoved
 }
 
-func newEventNeighborRemoved(c NeighborConfig) Event {
+func newEventNeighborRemoved(c *NeighborConfig) Event {
 	return &EventNeighborRemoved{
 		BaseEvent: BaseEvent{
 			t: time.Now(),
@@ -110,7 +116,7 @@ func (e *EventNeighborErr) Type() EventType {
 	return EventTypeNeighborErr
 }
 
-func newEventNeighborErr(c NeighborConfig, err error) Event {
+func newEventNeighborErr(c *NeighborConfig, err error) Event {
 	return &EventNeighborErr{
 		BaseEvent: BaseEvent{
 			t: time.Now(),
@@ -130,7 +136,7 @@ func (e *EventNeighborHoldTimerExpired) Type() EventType {
 	return EventTypeNeighborHoldTimerExpired
 }
 
-func newEventNeighborHoldTimerExpired(c NeighborConfig) Event {
+func newEventNeighborHoldTimerExpired(c *NeighborConfig) Event {
 	return &EventNeighborHoldTimerExpired{
 		BaseEvent: BaseEvent{
 			t: time.Now(),
@@ -150,7 +156,7 @@ func (e *EventNeighborStateTransition) Type() EventType {
 	return EventTypeNeighborStateTransition
 }
 
-func newEventNeighborStateTransition(c NeighborConfig, s FSMState) Event {
+func newEventNeighborStateTransition(c *NeighborConfig, s FSMState) Event {
 	return &EventNeighborStateTransition{
 		BaseEvent: BaseEvent{
 			t: time.Now(),
@@ -171,7 +177,7 @@ func (e *EventNeighborUpdateReceived) Type() EventType {
 	return EventTypeNeighborUpdateReceived
 }
 
-func newEventNeighborUpdateReceived(c NeighborConfig, u *UpdateMessage) Event {
+func newEventNeighborUpdateReceived(c *NeighborConfig, u *UpdateMessage) Event {
 	return &EventNeighborUpdateReceived{
 		BaseEvent: BaseEvent{
 			t: time.Now(),
@@ -192,7 +198,7 @@ func (e *EventNeighborNotificationReceived) Type() EventType {
 	return EventTypeNeighborUpdateReceived
 }
 
-func newEventNeighborNotificationReceived(c NeighborConfig, n *NotificationMessage) Event {
+func newEventNeighborNotificationReceived(c *NeighborConfig, n *NotificationMessage) Event {
 	return &EventNeighborNotificationReceived{
 		BaseEvent: BaseEvent{
 			t: time.Now(),

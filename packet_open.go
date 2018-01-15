@@ -350,7 +350,7 @@ func (u *capUnknown) deserialize(b []byte) error {
 	return nil
 }
 
-// MultiprotoAFI identifies the address family for multiprotocol bgp
+// MultiprotoAFI identifies the address family for multiprotocol bgp.
 type MultiprotoAFI uint16
 
 // MultiprotoAFI values
@@ -358,7 +358,7 @@ const (
 	BgpLsAFI MultiprotoAFI = 16388
 )
 
-// MultiprotoSAFI identifies the subsequent address family for multiprotocol bgp
+// MultiprotoSAFI identifies the subsequent address family for multiprotocol bgp.
 type MultiprotoSAFI uint8
 
 // MultiprotoSAFI values

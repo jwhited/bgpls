@@ -245,43 +245,38 @@ func (f *standardFSM) active() FSMState {
 	}
 }
 
-func messageFromBytes(t MessageType, b []byte) (Message, error) {
-	switch t {
-	case OpenMessageType:
-		m := &openMessage{}
-		err := m.deserialize(b)
-		if err != nil {
-			return nil, err
-		}
-		return m, nil
-	case KeepAliveMessageType:
-		m := &keepAliveMessage{}
-		err := m.deserialize(b)
-		if err != nil {
-			return nil, err
-		}
-		return m, nil
-	case UpdateMessageType:
-		m := &UpdateMessage{}
-		err := m.deserialize(b)
-		if err != nil {
-			return nil, err
-		}
-		return m, nil
-	case NotificationMessageType:
-		m := &NotificationMessage{}
-		err := m.deserialize(b)
-		if err != nil {
-			return nil, err
-		}
-		return m, nil
-	default:
-		return nil, &errWithNotification{
-			error:   fmt.Errorf("invalid message type %s", t),
-			code:    NotifErrCodeMessageHeader,
-			subcode: NotifErrSubcodeBadType,
-		}
+func (f *standardFSM) handleErr(err error, nextState FSMState) FSMState {
+	if err, ok := err.(*errWithNotification); ok {
+		f.sendNotification(err.code, err.subcode, err.data)
 	}
+
+	event := newEventNeighborErr(f.neighbor.config(), err)
+	select {
+	case f.events <- event:
+	case <-f.disable:
+		f.drainHoldTimer()
+		f.cleanupConn()
+		return DisabledState
+	}
+
+	f.drainHoldTimer()
+	f.cleanupConn()
+	return nextState
+}
+
+func (f *standardFSM) handleHoldTimerExpired(nextState FSMState) FSMState {
+	f.sendHoldTimerExpired()
+
+	event := newEventNeighborHoldTimerExpired(f.neighbor.config())
+	select {
+	case f.events <- event:
+	case <-f.disable:
+		f.cleanupConn()
+		return DisabledState
+	}
+
+	f.cleanupConn()
+	return nextState
 }
 
 func (f *standardFSM) read() {
@@ -298,75 +293,26 @@ func (f *standardFSM) read() {
 				select {
 				case f.readerErr <- err:
 				case <-f.closeReader:
-					return
 				}
+				return
 			}
 			buff = buff[:n]
 
-			for {
-				if len(buff) < 19 {
-					select {
-					case f.readerErr <- errors.New("received message < 19 bytes"):
-					case <-f.closeReader:
-						return
-					}
-
-					f.sendNotification(NotifErrCodeMessageHeader, NotifErrSubcodeBadLength, nil)
-					return
-				}
-
-				for i := 0; i < 16; i++ {
-					if buff[i] != 0xFF {
-						select {
-						case f.readerErr <- errors.New("invalid message header marker value"):
-						case <-f.closeReader:
-							return
-						}
-
-						f.sendNotification(NotifErrCodeMessageHeader, NotifErrSubcodeConnNotSynch, nil)
-						return
-					}
-				}
-
-				msgLen := binary.BigEndian.Uint16(buff[16:18])
-				if len(buff) < int(msgLen) {
-					select {
-					case f.readerErr <- errors.New("message header length invalid"):
-					case <-f.closeReader:
-						return
-					}
-
-					f.sendNotification(NotifErrCodeMessageHeader, NotifErrSubcodeBadLength, buff[16:18])
-					return
-				}
-
-				msgType := MessageType(buff[18])
-				msgBytes := buff[19:msgLen]
-
-				msg, err := messageFromBytes(msgType, msgBytes)
-				if err != nil {
-					select {
-					case f.readerErr <- fmt.Errorf("error deserializing message: %v, err: %v", msgType, err):
-					case <-f.closeReader:
-						return
-					}
-
-					if err, ok := err.(*errWithNotification); ok {
-						f.sendNotification(err.code, err.subcode, err.data)
-					}
-					return
-				}
-
+			msgs, err := messagesFromBytes(buff)
+			if err != nil {
 				select {
-				case f.msgCh <- msg:
+				case f.readerErr <- err:
+				case <-f.closeReader:
+				}
+
+				return
+			}
+
+			for _, m := range msgs {
+				select {
+				case f.msgCh <- m:
 				case <-f.closeReader:
 					return
-				}
-
-				if len(buff) > int(msgLen) {
-					buff = buff[msgLen:]
-				} else {
-					break
 				}
 			}
 		}
@@ -388,31 +334,9 @@ func (f *standardFSM) openSent() FSMState {
 		f.cleanupConn()
 		return DisabledState
 	case err := <-f.readerErr:
-		event := newEventNeighborErr(f.neighbor.config(), err)
-		select {
-		case f.events <- event:
-		case <-f.disable:
-			f.drainHoldTimer()
-			f.cleanupConn()
-			return DisabledState
-		}
-
-		f.drainHoldTimer()
-		f.cleanupConn()
-		return ActiveState
+		return f.handleErr(err, ActiveState)
 	case <-f.holdTimer.C:
-		f.sendHoldTimerExpired()
-
-		event := newEventNeighborHoldTimerExpired(f.neighbor.config())
-		select {
-		case f.events <- event:
-		case <-f.disable:
-			f.cleanupConn()
-			return DisabledState
-		}
-
-		f.cleanupConn()
-		return IdleState
+		return f.handleHoldTimerExpired(IdleState)
 	case m := <-f.msgCh:
 		open, isOpen := m.(*openMessage)
 		if !isOpen {
@@ -435,37 +359,12 @@ func (f *standardFSM) openSent() FSMState {
 
 		err := f.validateOpen(open)
 		if err != nil {
-			event := newEventNeighborErr(f.neighbor.config(), fmt.Errorf("error validating open message: %v", err))
-			select {
-			case f.events <- event:
-			case <-f.disable:
-				f.drainHoldTimer()
-				f.cleanupConn()
-				return DisabledState
-			}
-
-			if err, ok := err.(*errWithNotification); ok {
-				f.sendNotification(err.code, err.subcode, err.data)
-			}
-			f.drainHoldTimer()
-			f.cleanupConn()
-			return IdleState
+			return f.handleErr(err, IdleState)
 		}
 
 		err = f.sendKeepAlive()
 		if err != nil {
-			event := newEventNeighborErr(f.neighbor.config(), fmt.Errorf("error sending keepalive: %v", err))
-			select {
-			case f.events <- event:
-			case <-f.disable:
-				f.drainHoldTimer()
-				f.cleanupConn()
-				return DisabledState
-			}
-
-			f.drainHoldTimer()
-			f.cleanupConn()
-			return IdleState
+			return f.handleErr(err, IdleState)
 		}
 
 		f.drainAndResetHoldTimer()
@@ -492,46 +391,13 @@ func (f *standardFSM) openConfirm() FSMState {
 			f.cleanupConn()
 			return DisabledState
 		case err := <-f.readerErr:
-			event := newEventNeighborErr(f.neighbor.config(), err)
-			select {
-			case f.events <- event:
-			case <-f.disable:
-				f.drainHoldTimer()
-				f.cleanupConn()
-				return DisabledState
-			}
-
-			f.drainHoldTimer()
-			f.cleanupConn()
-			return IdleState
+			return f.handleErr(err, IdleState)
 		case <-f.holdTimer.C:
-			f.sendHoldTimerExpired()
-
-			event := newEventNeighborHoldTimerExpired(f.neighbor.config())
-			select {
-			case f.events <- event:
-			case <-f.disable:
-				f.cleanupConn()
-				return DisabledState
-			}
-
-			f.cleanupConn()
-			return IdleState
+			return f.handleHoldTimerExpired(IdleState)
 		case m := <-f.msgCh:
 			_, isKeepAlive := m.(*keepAliveMessage)
 			if !isKeepAlive {
-				event := newEventNeighborErr(f.neighbor.config(), fmt.Errorf("message received in openConfirm state is not a keepalive, type: %s", m.MessageType()))
-				select {
-				case f.events <- event:
-				case <-f.disable:
-					f.drainHoldTimer()
-					f.cleanupConn()
-					return DisabledState
-				}
-
-				f.drainHoldTimer()
-				f.cleanupConn()
-				return IdleState
+				return f.handleErr(fmt.Errorf("message received in openConfirm state is not a keepalive, type: %s", m.MessageType()), IdleState)
 			}
 
 			f.drainAndResetHoldTimer()
@@ -551,46 +417,13 @@ func (f *standardFSM) established() FSMState {
 			f.cleanupConn()
 			return DisabledState
 		case err := <-f.readerErr:
-			event := newEventNeighborErr(f.neighbor.config(), err)
-			select {
-			case f.events <- event:
-			case <-f.disable:
-				f.drainHoldTimer()
-				f.cleanupConn()
-				return DisabledState
-			}
-
-			f.drainHoldTimer()
-			f.cleanupConn()
-			return IdleState
+			return f.handleErr(err, IdleState)
 		case <-f.holdTimer.C:
-			f.sendHoldTimerExpired()
-
-			event := newEventNeighborHoldTimerExpired(f.neighbor.config())
-			select {
-			case f.events <- event:
-			case <-f.disable:
-				f.cleanupConn()
-				return DisabledState
-			}
-
-			f.cleanupConn()
-			return IdleState
+			return f.handleHoldTimerExpired(IdleState)
 		case <-f.keepAliveTimer.C:
 			err := f.sendKeepAlive()
 			if err != nil {
-				event := newEventNeighborErr(f.neighbor.config(), fmt.Errorf("error sending keepalive: %v", err))
-				select {
-				case f.events <- event:
-				case <-f.disable:
-					f.drainHoldTimer()
-					f.cleanupConn()
-					return DisabledState
-				}
-
-				f.drainHoldTimer()
-				f.cleanupConn()
-				return IdleState
+				return f.handleErr(err, IdleState)
 			}
 			// does not need to be drained
 			f.keepAliveTimer.Reset(f.keepAliveTime)
@@ -646,12 +479,10 @@ func (f *standardFSM) established() FSMState {
 
 func (f *standardFSM) loop() {
 	for {
-		f.RLock()
-		state := f.s
-		f.RUnlock()
+		state := f.state()
 
 		if state != DisabledState {
-			event := newEventNeighborStateTransition(f.neighbor.config(), f.s)
+			event := newEventNeighborStateTransition(f.neighbor.config(), state)
 			select {
 			case f.events <- event:
 			case <-f.disable:

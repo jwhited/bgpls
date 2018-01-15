@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// NeighborConfig is the configuration for a BGP-LS neighbor
+// NeighborConfig is the configuration for a BGP-LS neighbor.
 type NeighborConfig struct {
 	Address  net.IP
 	ASN      uint32
@@ -14,15 +14,15 @@ type NeighborConfig struct {
 
 type neighbor interface {
 	fsm
-	config() NeighborConfig
+	config() *NeighborConfig
 }
 
 type standardNeighbor struct {
 	fsm
-	c NeighborConfig
+	c *NeighborConfig
 }
 
-func newNeighbor(localASN uint32, config NeighborConfig, events chan Event) (neighbor, error) {
+func newNeighbor(localASN uint32, config *NeighborConfig, events chan Event) (neighbor, error) {
 	n := &standardNeighbor{
 		c: config,
 	}
@@ -32,6 +32,6 @@ func newNeighbor(localASN uint32, config NeighborConfig, events chan Event) (nei
 	return n, nil
 }
 
-func (n *standardNeighbor) config() NeighborConfig {
+func (n *standardNeighbor) config() *NeighborConfig {
 	return n.c
 }

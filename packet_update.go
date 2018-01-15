@@ -39,12 +39,12 @@ import (
       +-----------------------------------------------------+
 */
 
-// UpdateMessage is a bgp message
+// UpdateMessage is a bgp message.
 type UpdateMessage struct {
 	PathAttrs []PathAttr
 }
 
-// MessageType returns the appropriate MessageType for UpdateMessage
+// MessageType returns the appropriate MessageType for UpdateMessage.
 func (u *UpdateMessage) MessageType() MessageType {
 	return UpdateMessageType
 }
@@ -257,7 +257,7 @@ func pathAttrFlagsFromByte(b uint8) (PathAttrFlags, error) {
 	return flags, nil
 }
 
-// PathAttrFlags contains the flags for a bgp path attribute
+// PathAttrFlags contains the flags for a bgp path attribute.
 type PathAttrFlags struct {
 	Optional       bool
 	Transitive     bool
@@ -265,13 +265,13 @@ type PathAttrFlags struct {
 	ExtendedLength bool
 }
 
-// PathAttr is a bgp path attribute
+// PathAttr is a bgp path attribute.
 type PathAttr interface {
 	Flags() PathAttrFlags
 	Type() PathAttrType
 }
 
-// PathAttrType describes the type of a bgp path attribute
+// PathAttrType describes the type of a bgp path attribute.
 type PathAttrType uint8
 
 // PathAttrType values
@@ -284,7 +284,8 @@ const (
 	PathAttrLinkStateType PathAttrType = 29
 )
 
-// PathAttrLinkState is a bgp path attribute
+// PathAttrLinkState is a bgp path attribute.
+//
 // https://tools.ietf.org/html/rfc7752#section-3.3
 type PathAttrLinkState struct {
 	f           PathAttrFlags
@@ -293,12 +294,12 @@ type PathAttrLinkState struct {
 	PrefixAttrs []PrefixAttr
 }
 
-// Flags returns the flags for a link state path attribute
+// Flags returns the flags for a link state path attribute.
 func (p *PathAttrLinkState) Flags() PathAttrFlags {
 	return p.f
 }
 
-// Type returns the appropriate PathAttrType for PathAttrLinkState
+// Type returns the appropriate PathAttrType for PathAttrLinkState.
 func (p *PathAttrLinkState) Type() PathAttrType {
 	return PathAttrLinkStateType
 }
@@ -531,7 +532,8 @@ func (p *PathAttrLinkState) deserialize(f PathAttrFlags, b []byte) error {
 	return nil
 }
 
-// NodeAttrCode describes the type of node attribute contained in a BGP-LS attribute
+// NodeAttrCode describes the type of node attribute contained in a bgp-ls attribute
+//
 // https://tools.ietf.org/html/rfc7752#section-3.3.1
 type NodeAttrCode uint16
 
@@ -546,18 +548,19 @@ const (
 	NodeAttrCodeLocalIPv6RouterID NodeAttrCode = 1029
 )
 
-// NodeAttr is a node attribute contained in a BGP-LS attribute
+// NodeAttr is a node attribute contained in a bgp-ls attribute.
 type NodeAttr interface {
 	Code() NodeAttrCode
 }
 
-// NodeAttrMultiTopologyID is a node attribute contained in a BGP-LS attribute
+// NodeAttrMultiTopologyID is a node attribute contained in a bgp-ls attribute.
+//
 // https://tools.ietf.org/html/rfc7752#section-3.2.1.5
 type NodeAttrMultiTopologyID struct {
 	IDs []uint16
 }
 
-// Code returns the appropriate NodeAttrCode for NodeAttrMultiTopologyID
+// Code returns the appropriate NodeAttrCode for NodeAttrMultiTopologyID.
 func (n *NodeAttrMultiTopologyID) Code() NodeAttrCode {
 	return NodeAttrCodeMultiTopologyID
 }
@@ -572,7 +575,8 @@ func (n *NodeAttrMultiTopologyID) deserialize(b []byte) error {
 	return nil
 }
 
-// NodeAttrNodeFlagBits is a node attribute contained in a BGP-LS attribute
+// NodeAttrNodeFlagBits is a node attribute contained in a bgp-ls attribute.
+//
 // https://tools.ietf.org/html/rfc7752#section-3.3.1.1
 type NodeAttrNodeFlagBits struct {
 	Overload bool
@@ -583,7 +587,7 @@ type NodeAttrNodeFlagBits struct {
 	V6       bool
 }
 
-// Code returns the appropriate NodeAttrCode for NodeAttrNodeFlagBits
+// Code returns the appropriate NodeAttrCode for NodeAttrNodeFlagBits.
 func (n *NodeAttrNodeFlagBits) Code() NodeAttrCode {
 	return NodeAttrCodeNodeFlagBits
 }
@@ -607,13 +611,14 @@ func (n *NodeAttrNodeFlagBits) deserialize(b []byte) error {
 	return nil
 }
 
-// NodeAttrOpaqueNodeAttr is a node attribute contained a BGP-LS attribute
+// NodeAttrOpaqueNodeAttr is a node attribute contained a bgp-ls attribute.
+//
 // https://tools.ietf.org/html/rfc7752#section-3.3.1.5
 type NodeAttrOpaqueNodeAttr struct {
 	Data []byte
 }
 
-// Code returns the appropriate NodeAttrCode for NodeAttrOpaqueNodeAttr
+// Code returns the appropriate NodeAttrCode for NodeAttrOpaqueNodeAttr.
 func (n *NodeAttrOpaqueNodeAttr) Code() NodeAttrCode {
 	return NodeAttrCodeOpaqueNodeAttr
 }
@@ -623,13 +628,14 @@ func (n *NodeAttrOpaqueNodeAttr) deserialize(b []byte) error {
 	return nil
 }
 
-// NodeAttrNodeName is a node attribute contained in a BGP-LS attribute
+// NodeAttrNodeName is a node attribute contained in a bgp-ls attribute.
+//
 // https://tools.ietf.org/html/rfc7752#section-3.3.1.3
 type NodeAttrNodeName struct {
 	Name string
 }
 
-// Code returns the appropriate NodeAttrCode for NodeAttrNodeName
+// Code returns the appropriate NodeAttrCode for NodeAttrNodeName.
 func (n *NodeAttrNodeName) Code() NodeAttrCode {
 	return NodeAttrCodeNodeName
 }
@@ -643,13 +649,14 @@ func (n *NodeAttrNodeName) deserialize(b []byte) error {
 	return nil
 }
 
-// NodeAttrIsIsAreaID is a node attribute contained in a BGP-LS attribute
+// NodeAttrIsIsAreaID is a node attribute contained in a bgp-ls attribute.
+//
 // https://tools.ietf.org/html/rfc7752#section-3.3.1.2
 type NodeAttrIsIsAreaID struct {
 	AreaID uint16
 }
 
-// Code returns the appropriate NodeAttrCode for NodeAttrIsIsAreaID
+// Code returns the appropriate NodeAttrCode for NodeAttrIsIsAreaID.
 func (n *NodeAttrIsIsAreaID) Code() NodeAttrCode {
 	return NodeAttrCodeIsIsAreaID
 }
@@ -666,13 +673,14 @@ func (n *NodeAttrIsIsAreaID) deserialize(b []byte) error {
 	return nil
 }
 
-// NodeAttrLocalIPv4RouterID is a node attribute contained in a BGP-LS attribute
+// NodeAttrLocalIPv4RouterID is a node attribute contained in a bgp-ls attribute.
+//
 // https://tools.ietf.org/html/rfc5305#section-4.3
 type NodeAttrLocalIPv4RouterID struct {
 	Address net.IP
 }
 
-// Code returns the appropriate NodeAttrCode for NodeAttrLocalIPv4RouterID
+// Code returns the appropriate NodeAttrCode for NodeAttrLocalIPv4RouterID.
 func (n *NodeAttrLocalIPv4RouterID) Code() NodeAttrCode {
 	return NodeAttrCodeLocalIPv4RouterID
 }
@@ -699,13 +707,14 @@ func (n *NodeAttrLocalIPv4RouterID) deserialize(b []byte) error {
 	return nil
 }
 
-// NodeAttrLocalIPv6RouterID is a node attribute contained in a BGP-LS attribute
+// NodeAttrLocalIPv6RouterID is a node attribute contained in a bgp-ls attribute.
+//
 // https://tools.ietf.org/html/rfc5305#section-4.1
 type NodeAttrLocalIPv6RouterID struct {
 	Address net.IP
 }
 
-// Code returns the appropriate NodeAttrCode for NodeAttrLocalIPv6RouterID
+// Code returns the appropriate NodeAttrCode for NodeAttrLocalIPv6RouterID.
 func (n *NodeAttrLocalIPv6RouterID) Code() NodeAttrCode {
 	return NodeAttrCodeLocalIPv6RouterID
 }
@@ -732,12 +741,13 @@ func (n *NodeAttrLocalIPv6RouterID) deserialize(b []byte) error {
 	return nil
 }
 
-// LinkAttr is a link attribute contained in a BGP-LS attribute
+// LinkAttr is a link attribute contained in a bgp-ls attribute.
 type LinkAttr interface {
 	Code() LinkAttrCode
 }
 
-// LinkAttrCode describes the type of node attribute contained in a BGP-LS attribute
+// LinkAttrCode describes the type of node attribute contained in a bgp-ls attribute.
+//
 // https://tools.ietf.org/html/rfc7752#section-3.3.2
 type LinkAttrCode uint16
 
@@ -758,13 +768,14 @@ const (
 	LinkAttrCodeLinkName                   LinkAttrCode = 1098
 )
 
-// LinkAttrRemoteIPv4RouterID is a link attribute contained in a BGP-LS attribute
+// LinkAttrRemoteIPv4RouterID is a link attribute contained in a bgp-ls attribute.
+//
 // https://tools.ietf.org/html/rfc5305#section-4.3
 type LinkAttrRemoteIPv4RouterID struct {
 	Address net.IP
 }
 
-// Code returns the appropriate LinkAttrCode for LinkAttrRemoteIPv4RouterID
+// Code returns the appropriate LinkAttrCode for LinkAttrRemoteIPv4RouterID.
 func (l *LinkAttrRemoteIPv4RouterID) Code() LinkAttrCode {
 	return LinkAttrCodeRemoteIPv4RouterID
 }
@@ -791,13 +802,14 @@ func (l *LinkAttrRemoteIPv4RouterID) deserialize(b []byte) error {
 	return nil
 }
 
-// LinkAttrRemoteIPv6RouterID is a link attribute contained in a BGP-LS attribute
+// LinkAttrRemoteIPv6RouterID is a link attribute contained in a bgp-ls attribute.
+//
 // https://tools.ietf.org/html/rfc6119#section-4.1
 type LinkAttrRemoteIPv6RouterID struct {
 	Address net.IP
 }
 
-// Code returns the appropriate LinkAttrCode for LinkAttrRemoteIPv6RouterID
+// Code returns the appropriate LinkAttrCode for LinkAttrRemoteIPv6RouterID.
 func (l *LinkAttrRemoteIPv6RouterID) Code() LinkAttrCode {
 	return LinkAttrCodeRemoteIPv6RouterID
 }
@@ -824,13 +836,14 @@ func (l *LinkAttrRemoteIPv6RouterID) deserialize(b []byte) error {
 	return nil
 }
 
-// LinkAttrAdminGroup is a link attribute contained in a BGP-LS attribute
+// LinkAttrAdminGroup is a link attribute contained in a bgp-ls attribute.
+//
 // https://tools.ietf.org/html/rfc5305#section-3.1
 type LinkAttrAdminGroup struct {
 	Group [32]bool
 }
 
-// Code returns the appropriate LinkAttrCode for LinkAttrAdminGroup
+// Code returns the appropriate LinkAttrCode for LinkAttrAdminGroup.
 func (l *LinkAttrAdminGroup) Code() LinkAttrCode {
 	return LinkAttrCodeAdminGroup
 }
@@ -862,13 +875,14 @@ func (l *LinkAttrAdminGroup) deserialize(b []byte) error {
 	return nil
 }
 
-// LinkAttrMaxLinkBandwidth is a link attribute contained in a BGP-LS attribute
+// LinkAttrMaxLinkBandwidth is a link attribute contained in a bgp-ls attribute.
+//
 // https://tools.ietf.org/html/rfc5305#section-3.4
 type LinkAttrMaxLinkBandwidth struct {
 	BytesPerSecond float32
 }
 
-// Code returns the appropriate LinkAttrCode for LinkAttrMaxLinkBandwidth
+// Code returns the appropriate LinkAttrCode for LinkAttrMaxLinkBandwidth.
 func (l *LinkAttrMaxLinkBandwidth) Code() LinkAttrCode {
 	return LinkAttrCodeMaxLinkBandwidth
 }
@@ -896,13 +910,14 @@ func (l *LinkAttrMaxLinkBandwidth) deserialize(b []byte) error {
 	return nil
 }
 
-// LinkAttrMaxReservableLinkBandwidth is a link attribute contained in a BGP-LS attribute
+// LinkAttrMaxReservableLinkBandwidth is a link attribute contained in a bgp-ls attribute.
+//
 // https://tools.ietf.org/html/rfc5305#section-3.5
 type LinkAttrMaxReservableLinkBandwidth struct {
 	BytesPerSecond float32
 }
 
-// Code returns the appropriate LinkAttrCode for LinkAttrMaxReservableLinkBandwidth
+// Code returns the appropriate LinkAttrCode for LinkAttrMaxReservableLinkBandwidth.
 func (l *LinkAttrMaxReservableLinkBandwidth) Code() LinkAttrCode {
 	return LinkAttrCodeMaxReservableLinkBandwidth
 }
@@ -930,14 +945,15 @@ func (l *LinkAttrMaxReservableLinkBandwidth) deserialize(b []byte) error {
 	return nil
 }
 
-// LinkAttrUnreservedBandwidth is link attribute contained in a BGP-LS attribute
+// LinkAttrUnreservedBandwidth is a link attribute contained in a bgp-ls attribute.
+// The index number represents the priority level.
+//
 // https://tools.ietf.org/html/rfc5305#section-3.6
-// The index number represents the priority level
 type LinkAttrUnreservedBandwidth struct {
 	BytesPerSecond [8]float32
 }
 
-// Code returns the appropriate LinkAttrCode for LinkAttrUnreservedBandwidth
+// Code returns the appropriate LinkAttrCode for LinkAttrUnreservedBandwidth.
 func (l *LinkAttrUnreservedBandwidth) Code() LinkAttrCode {
 	return LinkAttrCodeUnreservedBandwidth
 }
@@ -968,13 +984,14 @@ func (l *LinkAttrUnreservedBandwidth) deserialize(b []byte) error {
 	return nil
 }
 
-// LinkAttrTEDefaultMetric is a link attribute contained in a BGP-LS attribute
+// LinkAttrTEDefaultMetric is a link attribute contained in a bgp-ls attribute.
+//
 // https://tools.ietf.org/html/rfc5305#section-3.7
 type LinkAttrTEDefaultMetric struct {
 	Metric uint32
 }
 
-// Code returns the appropriate LinkAttrCode for LinkAttrTEDefaultMetric
+// Code returns the appropriate LinkAttrCode for LinkAttrTEDefaultMetric.
 func (l *LinkAttrTEDefaultMetric) Code() LinkAttrCode {
 	return LinkAttrCodeTEDefaultMetric
 }
@@ -992,7 +1009,8 @@ func (l *LinkAttrTEDefaultMetric) deserialize(b []byte) error {
 	return nil
 }
 
-// LinkAttrLinkProtectionType is a link attribute contained in a BGP-LS attribute
+// LinkAttrLinkProtectionType is a link attribute contained in a bgp-ls attribute.
+//
 // https://tools.ietf.org/html/rfc5307#section-1.2
 type LinkAttrLinkProtectionType struct {
 	ExtraTraffic        bool
@@ -1003,7 +1021,7 @@ type LinkAttrLinkProtectionType struct {
 	Enhanced            bool
 }
 
-// Code returns the appropriate LinkAttrCode for LinkAttrLinkProtectionType
+// Code returns the appropriate LinkAttrCode for LinkAttrLinkProtectionType.
 func (l *LinkAttrLinkProtectionType) Code() LinkAttrCode {
 	return LinkAttrCodeLinkProtectionType
 }
@@ -1027,14 +1045,15 @@ func (l *LinkAttrLinkProtectionType) deserialize(b []byte) error {
 	return nil
 }
 
-// LinkAttrMplsProtocolMask is a link attribute contained in a BGP-LS attribute
+// LinkAttrMplsProtocolMask is a link attribute contained in a bgp-ls attribute.
+//
 // https://tools.ietf.org/html/rfc7752#section-3.3.2.2
 type LinkAttrMplsProtocolMask struct {
 	LDP    bool
 	RsvpTE bool
 }
 
-// Code returns the appropriate LinkAttrCode for LinkAttrMplsProtocolMask
+// Code returns the appropriate LinkAttrCode for LinkAttrMplsProtocolMask.
 func (l *LinkAttrMplsProtocolMask) Code() LinkAttrCode {
 	return LinkAttrCodeMplsProtocolMask
 }
@@ -1053,13 +1072,14 @@ func (l *LinkAttrMplsProtocolMask) deserialize(b []byte) error {
 	return nil
 }
 
-// LinkAttrIgpMetric is a link attribute contained in a BGP-LS attribute
+// LinkAttrIgpMetric is a link attribute contained in a bgp-ls attribute.
+//
 // https://tools.ietf.org/html/rfc7752#section-3.3.2.4
 type LinkAttrIgpMetric struct {
 	Metric uint32
 }
 
-// Code returns the appropriate LinkAttrCode for LinkAttrIgpMetric
+// Code returns the appropriate LinkAttrCode for LinkAttrIgpMetric.
 func (l *LinkAttrIgpMetric) Code() LinkAttrCode {
 	return LinkAttrCodeIgpMetric
 }
@@ -1084,13 +1104,14 @@ func (l *LinkAttrIgpMetric) deserialize(b []byte) error {
 	return nil
 }
 
-// LinkAttrSharedRiskLinkGroup is a link attribute contained in a BGP-LS attribute
+// LinkAttrSharedRiskLinkGroup is a link attribute contained in a bgp-ls attribute.
+//
 // https://tools.ietf.org/html/rfc7752#section-3.3.2.5
 type LinkAttrSharedRiskLinkGroup struct {
 	Groups []uint32
 }
 
-// Code returns the appropriate LinkAttrCode for LinkAttrSharedRiskLinkGroups
+// Code returns the appropriate LinkAttrCode for LinkAttrSharedRiskLinkGroups.
 func (l *LinkAttrSharedRiskLinkGroup) Code() LinkAttrCode {
 	return LinkAttrCodeSharedRiskLinkGroup
 }
@@ -1115,13 +1136,14 @@ func (l *LinkAttrSharedRiskLinkGroup) deserialize(b []byte) error {
 	return nil
 }
 
-// LinkAttrOpaqueLinkAttr is a link attribute contained in a BGP-LS attribute
+// LinkAttrOpaqueLinkAttr is a link attribute contained in a bgp-ls attribute.
+//
 // https://tools.ietf.org/html/rfc7752#section-3.3.2.6
 type LinkAttrOpaqueLinkAttr struct {
 	Data []byte
 }
 
-// Code returns the appropriate LinkAttrCode for LinkAttrOpaqueLinkAttr
+// Code returns the appropriate LinkAttrCode for LinkAttrOpaqueLinkAttr.
 func (l *LinkAttrOpaqueLinkAttr) Code() LinkAttrCode {
 	return LinkAttrCodeOpaqueLinkAttr
 }
@@ -1131,13 +1153,14 @@ func (l *LinkAttrOpaqueLinkAttr) deserialize(b []byte) error {
 	return nil
 }
 
-// LinkAttrLinkName is a link attribute contained in a BGP-LS attribute
+// LinkAttrLinkName is a link attribute contained in a bgp-ls attribute.
+//
 // https://tools.ietf.org/html/rfc7752#section-3.3.2.7
 type LinkAttrLinkName struct {
 	Name string
 }
 
-// Code returns the appropriate LinkAttrCode for LinkAttrLinkName
+// Code returns the appropriate LinkAttrCode for LinkAttrLinkName.
 func (l *LinkAttrLinkName) Code() LinkAttrCode {
 	return LinkAttrCodeLinkName
 }
@@ -1148,12 +1171,13 @@ func (l *LinkAttrLinkName) deserialize(b []byte) error {
 	return nil
 }
 
-// PrefixAttr is a prefix attribute contained in a BGP-LS attribute
+// PrefixAttr is a prefix attribute contained in a bgp-ls attribute.
 type PrefixAttr interface {
 	Code() PrefixAttrCode
 }
 
-// PrefixAttrCode describes the type of prefix attribute contained in a BGP-LS attribute
+// PrefixAttrCode describes the type of prefix attribute contained in a bgp-ls attribute.
+//
 // https://tools.ietf.org/html/rfc7752#section-3.3.3
 type PrefixAttrCode uint16
 
@@ -1167,7 +1191,8 @@ const (
 	PrefixAttrCodeOpaquePrefixAttribute PrefixAttrCode = 1157
 )
 
-// PrefixAttrIgpFlags is a prefix attribute contained in a BGP-LS attribute
+// PrefixAttrIgpFlags is a prefix attribute contained in a bgp-ls attribute.
+//
 // https://tools.ietf.org/html/rfc7752#section-3.3.3.1
 type PrefixAttrIgpFlags struct {
 	IsIsDown          bool
@@ -1176,7 +1201,7 @@ type PrefixAttrIgpFlags struct {
 	OspfPropagateNssa bool
 }
 
-// Code returns the appropriate PrefixAttrCode for PrefixAttrIgpFlags
+// Code returns the appropriate PrefixAttrCode for PrefixAttrIgpFlags.
 func (p *PrefixAttrIgpFlags) Code() PrefixAttrCode {
 	return PrefixAttrCodeIgpFlags
 }
@@ -1209,13 +1234,14 @@ func (p *PrefixAttrIgpFlags) deserialize(b []byte) error {
 	return nil
 }
 
-// PrefixAttrIgpRouteTag is a prefix attribute contained in a BGP-LS attribute
+// PrefixAttrIgpRouteTag is a prefix attribute contained in a bgp-ls attribute.
+//
 // https://tools.ietf.org/html/rfc7752#section-3.3.3.2
 type PrefixAttrIgpRouteTag struct {
 	Tags []uint32
 }
 
-// Code returns the appropriate PrefixAttrCode for PrefixAttrIgpRouteTag
+// Code returns the appropriate PrefixAttrCode for PrefixAttrIgpRouteTag.
 func (p *PrefixAttrIgpRouteTag) Code() PrefixAttrCode {
 	return PrefixAttrCodeIgpRouteTag
 }
@@ -1239,13 +1265,14 @@ func (p *PrefixAttrIgpRouteTag) deserialize(b []byte) error {
 	return nil
 }
 
-// PrefixAttrIgpExtendedRouteTag is a prefix attribute contained in a BGP-LS attribute
+// PrefixAttrIgpExtendedRouteTag is a prefix attribute contained in a bgp-ls attribute.
+//
 // https://tools.ietf.org/html/rfc7752#section-3.3.3.3
 type PrefixAttrIgpExtendedRouteTag struct {
 	Tags []uint64
 }
 
-// Code returns the appropriate PrefixAttrCode for PrefixAttrIgpExtendedRouteTag
+// Code returns the appropriate PrefixAttrCode for PrefixAttrIgpExtendedRouteTag.
 func (p *PrefixAttrIgpExtendedRouteTag) Code() PrefixAttrCode {
 	return PrefixAttrCodeIgpExtendedRouteTag
 }
@@ -1269,13 +1296,14 @@ func (p *PrefixAttrIgpExtendedRouteTag) deserialize(b []byte) error {
 	return nil
 }
 
-// PrefixAttrPrefixMetric is a prefix attributed contained in a BGP-LS attribute
+// PrefixAttrPrefixMetric is a prefix attributed contained in a bgp-ls attribute.
+//
 // https://tools.ietf.org/html/rfc7752#section-3.3.3.4
 type PrefixAttrPrefixMetric struct {
 	Metric uint32
 }
 
-// Code returns the appropriate PrefixAttrCode for PrefixAttrPrefixMetric
+// Code returns the appropriate PrefixAttrCode for PrefixAttrPrefixMetric.
 func (p *PrefixAttrPrefixMetric) Code() PrefixAttrCode {
 	return PrefixAttrCodePrefixMetric
 }
@@ -1293,13 +1321,14 @@ func (p *PrefixAttrPrefixMetric) deserialize(b []byte) error {
 	return nil
 }
 
-// PrefixAttrOspfForwardingAddress is a prefix attribute contained in a BGP-LS attribute
+// PrefixAttrOspfForwardingAddress is a prefix attribute contained in a bgp-ls attribute.
+//
 // https://tools.ietf.org/html/rfc7752#section-3.3.3.5
 type PrefixAttrOspfForwardingAddress struct {
 	Address net.IP
 }
 
-// Code returns the appropriate PrefixAttrCode for PrefixAttrOspfForwardingAddress
+// Code returns the appropriate PrefixAttrCode for PrefixAttrOspfForwardingAddress.
 func (p *PrefixAttrOspfForwardingAddress) Code() PrefixAttrCode {
 	return PrefixAttrCodeOspfForwardingAddress
 }
@@ -1321,12 +1350,12 @@ func (p *PrefixAttrOspfForwardingAddress) deserialize(b []byte) error {
 	return nil
 }
 
-// PrefixAttrOpaquePrefixAttribute is a prefix attribute contained in a BGP-LS attribute
+// PrefixAttrOpaquePrefixAttribute is a prefix attribute contained in a bgp-ls attribute.
 type PrefixAttrOpaquePrefixAttribute struct {
 	Data []byte
 }
 
-// Code returns the appropriate PrefixAttrCode for PrefixAttrOpaquePrefixAttribute
+// Code returns the appropriate PrefixAttrCode for PrefixAttrOpaquePrefixAttribute.
 func (p *PrefixAttrOpaquePrefixAttribute) Code() PrefixAttrCode {
 	return PrefixAttrCodeOpaquePrefixAttribute
 }
@@ -1336,7 +1365,8 @@ func (p *PrefixAttrOpaquePrefixAttribute) deserialize(b []byte) error {
 	return nil
 }
 
-// PathAttrMpReach is a path attribute
+// PathAttrMpReach is a path attribute.
+//
 // https://tools.ietf.org/html/rfc4760#section-3
 type PathAttrMpReach struct {
 	f    PathAttrFlags
@@ -1395,17 +1425,18 @@ func (p *PathAttrMpReach) deserialize(f PathAttrFlags, b []byte) error {
 	return nil
 }
 
-// Flags returns the PathAttrFlags for PathAttrMpReach
+// Flags returns the PathAttrFlags for PathAttrMpReach.
 func (p *PathAttrMpReach) Flags() PathAttrFlags {
 	return p.f
 }
 
-// Type returns the appropriate PathAttrType for PathAttrMpReach
+// Type returns the appropriate PathAttrType for PathAttrMpReach.
 func (p *PathAttrMpReach) Type() PathAttrType {
 	return PathAttrMpReachType
 }
 
-// PathAttrMpUnreach is a path attribute
+// PathAttrMpUnreach is a path attribute.
+//
 // https://tools.ietf.org/html/rfc4760#section-4
 type PathAttrMpUnreach struct {
 	f    PathAttrFlags
@@ -1453,17 +1484,18 @@ func (p *PathAttrMpUnreach) deserialize(f PathAttrFlags, b []byte) error {
 	return nil
 }
 
-// Flags returns the PathAttrFlags for PathAttrMpUnreach
+// Flags returns the PathAttrFlags for PathAttrMpUnreach.
 func (p *PathAttrMpUnreach) Flags() PathAttrFlags {
 	return p.f
 }
 
-// Type returns the appropriate PathAttrType for PathAttrMpUnreach
+// Type returns the appropriate PathAttrType for PathAttrMpUnreach.
 func (p *PathAttrMpUnreach) Type() PathAttrType {
 	return PathAttrMpUnreachType
 }
 
-// NLRI is network layer reachability information and is contained in a multiprotocol (un)reachable path attribute
+// NLRI is network layer reachability information and is contained in a multiprotocol (un)reachable path attribute.
+//
 // https://tools.ietf.org/html/rfc4760#section-3
 type NLRI interface {
 	AFI() MultiprotoAFI
@@ -1471,19 +1503,19 @@ type NLRI interface {
 	deserialize(b []byte) error
 }
 
-// NLRIUnknown is an unknown type of nlri
+// NLRIUnknown is an unknown type of nlri.
 type NLRIUnknown struct {
 	a    MultiprotoAFI
 	s    MultiprotoSAFI
 	data []byte
 }
 
-// AFI returns the address family id for NLRIUnknown
+// AFI returns the address family id for NLRIUnknown.
 func (n *NLRIUnknown) AFI() MultiprotoAFI {
 	return n.a
 }
 
-// SAFI returns the subsequent address family id for NLRIUnknown
+// SAFI returns the subsequent address family id for NLRIUnknown.
 func (n *NLRIUnknown) SAFI() MultiprotoSAFI {
 	return n.s
 }
@@ -1493,7 +1525,8 @@ func (n *NLRIUnknown) deserialize(b []byte) error {
 	return nil
 }
 
-// NLRILinkState are contained in an NLRI for BGP-LS
+// NLRILinkState are contained in an NLRI for bgp-ls.
+//
 // https://tools.ietf.org/html/rfc7752#section-3.2
 type NLRILinkState struct {
 	Nodes    []LinkStateNlriNode
@@ -1501,12 +1534,12 @@ type NLRILinkState struct {
 	Prefixes []LinkStateNlriPrefix
 }
 
-// AFI returns the address family id for NLRILinkState
+// AFI returns the address family id for NLRILinkState.
 func (ls *NLRILinkState) AFI() MultiprotoAFI {
 	return BgpLsAFI
 }
 
-// SAFI returns the subsequent address family id for NLRILinkState
+// SAFI returns the subsequent address family id for NLRILinkState.
 func (ls *NLRILinkState) SAFI() MultiprotoSAFI {
 	return BgpLsSAFI
 }
@@ -1583,7 +1616,8 @@ func (ls *NLRILinkState) deserialize(b []byte) error {
 	return nil
 }
 
-// LinkStateNlriType describes the type of bgp-ls nlri
+// LinkStateNlriType describes the type of bgp-ls nlri.
+//
 // https://tools.ietf.org/html/rfc7752#section-3.2 figure 6
 type LinkStateNlriType uint16
 
@@ -1596,7 +1630,8 @@ const (
 	LinkStateNlriIpv6PrefixType
 )
 
-// LinkStateNlriProtocolID describes the protocol of the link state nlri
+// LinkStateNlriProtocolID describes the protocol of the link state nlri.
+//
 // https://tools.ietf.org/html/rfc7752#section-3.2 table 2
 type LinkStateNlriProtocolID uint8
 
@@ -1611,7 +1646,8 @@ const (
 	LinkStateNlriOSPFv3ProtocolID
 )
 
-// LinkStateNlriNode is a link state NLRI
+// LinkStateNlriNode is a link state NLRI.
+//
 // https://tools.ietf.org/html/rfc7752#section-3.2 figure 7
 type LinkStateNlriNode struct {
 	ProtocolID           LinkStateNlriProtocolID
@@ -1619,7 +1655,7 @@ type LinkStateNlriNode struct {
 	LocalNodeDescriptors []NodeDescriptor
 }
 
-// LinkStateNlriDescriptorCode describes the type of link state nlri
+// LinkStateNlriDescriptorCode describes the type of link state nlri.
 type LinkStateNlriDescriptorCode uint16
 
 // LinkStateNlriDescriptorCode values
@@ -1814,13 +1850,15 @@ func (n *LinkStateNlriNode) deserialize(b []byte) error {
 	return nil
 }
 
-// NodeDescriptor is a bgp-ls nlri node descriptor
+// NodeDescriptor is a bgp-ls nlri node descriptor.
+//
 // https://tools.ietf.org/html/rfc7752#section-3.2.1
 type NodeDescriptor interface {
 	Code() NodeDescriptorCode
 }
 
-// NodeDescriptorCode describes the type of node descriptor
+// NodeDescriptorCode describes the type of node descriptor.
+//
 // https://tools.ietf.org/html/rfc7752#section-3.2.1.4
 type NodeDescriptorCode uint16
 
@@ -1832,13 +1870,14 @@ const (
 	NodeDescriptorCodeIgpRouterID NodeDescriptorCode = 515
 )
 
-// NodeDescriptorASN is a node descriptor contained in a bgp-ls node nlri
+// NodeDescriptorASN is a node descriptor contained in a bgp-ls node nlri.
+//
 // https://tools.ietf.org/html/rfc7752#section-3.2.1.4
 type NodeDescriptorASN struct {
 	ASN uint32
 }
 
-// Code returns the appropriate NodeDescriptorCode for NodeDescriptorASN
+// Code returns the appropriate NodeDescriptorCode for NodeDescriptorASN.
 func (n *NodeDescriptorASN) Code() NodeDescriptorCode {
 	return NodeDescriptorCodeASN
 }
@@ -1856,13 +1895,14 @@ func (n *NodeDescriptorASN) deserialize(b []byte) error {
 	return nil
 }
 
-// NodeDescriptorBgpLsID is a node descriptor contained in a bgp-ls node nlri
+// NodeDescriptorBgpLsID is a node descriptor contained in a bgp-ls node nlri.
+//
 // https://tools.ietf.org/html/rfc7752#section-3.2.1.4
 type NodeDescriptorBgpLsID struct {
 	ID uint32
 }
 
-// Code returns the appropriate NodeDescriptorCode for NodeDescriptorBgpLsID
+// Code returns the appropriate NodeDescriptorCode for NodeDescriptorBgpLsID.
 func (n *NodeDescriptorBgpLsID) Code() NodeDescriptorCode {
 	return NodeDescriptorCodeBgpLsID
 }
@@ -1880,13 +1920,14 @@ func (n *NodeDescriptorBgpLsID) deserialize(b []byte) error {
 	return nil
 }
 
-// NodeDescriptorOspfAreaID is a node descriptor contained in a bgp-ls node nlri
+// NodeDescriptorOspfAreaID is a node descriptor contained in a bgp-ls node nlri.
+//
 // https://tools.ietf.org/html/rfc7752#section-3.2.1.4
 type NodeDescriptorOspfAreaID struct {
 	ID uint32
 }
 
-// Code returns the appropriate NodeDescriptorCode for NodeDescriptorOspfAreaID
+// Code returns the appropriate NodeDescriptorCode for NodeDescriptorOspfAreaID.
 func (n *NodeDescriptorOspfAreaID) Code() NodeDescriptorCode {
 	return NodeDescriptorCodeOspfAreaID
 }
@@ -1904,7 +1945,8 @@ func (n *NodeDescriptorOspfAreaID) deserialize(b []byte) error {
 	return nil
 }
 
-// NodeDescriptorIgpRouterIDType describes the type of igp router id
+// NodeDescriptorIgpRouterIDType describes the type of igp router id.
+//
 // https://tools.ietf.org/html/rfc7752#section-3.2.1.4
 type NodeDescriptorIgpRouterIDType uint8
 
@@ -1916,13 +1958,14 @@ const (
 	NodeDescriptorIgpRouterIDOspfPseudoType
 )
 
-// NodeDescriptorIgpRouterIDIsIsNonPseudo is a node descriptor contained in a bgp-ls node nlri
+// NodeDescriptorIgpRouterIDIsIsNonPseudo is a node descriptor contained in a bgp-ls node nlri.
+//
 // https://tools.ietf.org/html/rfc7752#section-3.2.1.4
 type NodeDescriptorIgpRouterIDIsIsNonPseudo struct {
 	IsoNodeID uint64
 }
 
-// Code returns the appropriate NodeDescriptorCode for NodeDescriptorIgpRouterIDIsIsNonPseudo
+// Code returns the appropriate NodeDescriptorCode for NodeDescriptorIgpRouterIDIsIsNonPseudo.
 func (n *NodeDescriptorIgpRouterIDIsIsNonPseudo) Code() NodeDescriptorCode {
 	return NodeDescriptorCodeIgpRouterID
 }
@@ -1941,14 +1984,15 @@ func (n *NodeDescriptorIgpRouterIDIsIsNonPseudo) deserialize(b []byte) error {
 	return nil
 }
 
-// NodeDescriptorIgpRouterIDIsIsPseudo is a node descriptor contained in a bgp-ls node nlri
+// NodeDescriptorIgpRouterIDIsIsPseudo is a node descriptor contained in a bgp-ls node nlri.
+//
 // https://tools.ietf.org/html/rfc7752#section-3.2.1.4
 type NodeDescriptorIgpRouterIDIsIsPseudo struct {
 	IsoNodeID uint64
 	PsnID     uint8
 }
 
-// Code returns the appropriate NodeDescriptorCode for NodeDescriptorIgpRouterIDIsIsPseudo
+// Code returns the appropriate NodeDescriptorCode for NodeDescriptorIgpRouterIDIsIsPseudo.
 func (n *NodeDescriptorIgpRouterIDIsIsPseudo) Code() NodeDescriptorCode {
 	return NodeDescriptorCodeIgpRouterID
 }
@@ -1968,13 +2012,14 @@ func (n *NodeDescriptorIgpRouterIDIsIsPseudo) deserialize(b []byte) error {
 	return nil
 }
 
-// NodeDescriptorIgpRouterIDOspfNonPseudo is a node descriptor contained in a bgp-ls node nlri
+// NodeDescriptorIgpRouterIDOspfNonPseudo is a node descriptor contained in a bgp-ls node nlri.
+//
 // https://tools.ietf.org/html/rfc7752#section-3.2.1.4
 type NodeDescriptorIgpRouterIDOspfNonPseudo struct {
 	RouterID net.IP
 }
 
-// Code returns the appropriate NodeDescriptorCode for NodeDescriptorIgpRouterIDOspfNonPseudo
+// Code returns the appropriate NodeDescriptorCode for NodeDescriptorIgpRouterIDOspfNonPseudo.
 func (n *NodeDescriptorIgpRouterIDOspfNonPseudo) Code() NodeDescriptorCode {
 	return NodeDescriptorCodeIgpRouterID
 }
@@ -2001,14 +2046,15 @@ func (n *NodeDescriptorIgpRouterIDOspfNonPseudo) deserialize(b []byte) error {
 	return nil
 }
 
-// NodeDescriptorIgpRouterIDOspfPseudo is a node descriptor contained in a bgp-ls node nlri
+// NodeDescriptorIgpRouterIDOspfPseudo is a node descriptor contained in a bgp-ls node nlri.
+//
 // https://tools.ietf.org/html/rfc7752#section-3.2.1.4
 type NodeDescriptorIgpRouterIDOspfPseudo struct {
 	DrRouterID       net.IP
 	DrInterfaceToLAN net.IP
 }
 
-// Code returns the appropriate NodeDescriptorCode for NodeDescriptorIgpRouterIDOspfPseudo
+// Code returns the appropriate NodeDescriptorCode for NodeDescriptorIgpRouterIDOspfPseudo.
 func (n *NodeDescriptorIgpRouterIDOspfPseudo) Code() NodeDescriptorCode {
 	return NodeDescriptorCodeIgpRouterID
 }
@@ -2127,12 +2173,13 @@ func deserializeLinkDescriptors(id LinkStateNlriProtocolID, b []byte) ([]LinkDes
 	return descriptors, nil
 }
 
-// LinkDescriptor is a bgp-ls nlri
+// LinkDescriptor is a bgp-ls nlri.
 type LinkDescriptor interface {
 	Code() LinkDescriptorCode
 }
 
-// LinkDescriptorCode describes the type of link descriptor
+// LinkDescriptorCode describes the type of link descriptor.
+//
 // https://tools.ietf.org/html/rfc7752#section-3.2.2 table 5
 type LinkDescriptorCode uint16
 
@@ -2146,14 +2193,15 @@ const (
 	LinkDescriptorCodeMultiTopologyID      LinkDescriptorCode = 263
 )
 
-// LinkDescriptorLinkIDs is a link descriptor contained in a bgp-ls link nlri
+// LinkDescriptorLinkIDs is a link descriptor contained in a bgp-ls link nlri.
+//
 // https://tools.ietf.org/html/rfc5307#section-1.1
 type LinkDescriptorLinkIDs struct {
 	LocalID  uint32
 	RemoteID uint32
 }
 
-// Code returns the appropriate LinkDescriptorCode for LinkDescriptorLinkIDs
+// Code returns the appropriate LinkDescriptorCode for LinkDescriptorLinkIDs.
 func (l *LinkDescriptorLinkIDs) Code() LinkDescriptorCode {
 	return LinkDescriptorCodeLinkIDs
 }
@@ -2172,13 +2220,14 @@ func (l *LinkDescriptorLinkIDs) deserialize(b []byte) error {
 	return nil
 }
 
-// LinkDescriptorIPv4InterfaceAddress is a link descriptor contained in a bgp-ls link nlri
+// LinkDescriptorIPv4InterfaceAddress is a link descriptor contained in a bgp-ls link nlri.
+//
 // https://tools.ietf.org/html/rfc5305#section-3.2
 type LinkDescriptorIPv4InterfaceAddress struct {
 	Address net.IP
 }
 
-// Code returns the appropriate LinkDescriptorCode for LinkDescriptorIPv4InterfaceAddress
+// Code returns the appropriate LinkDescriptorCode for LinkDescriptorIPv4InterfaceAddress.
 func (l *LinkDescriptorIPv4InterfaceAddress) Code() LinkDescriptorCode {
 	return LinkDescriptorCodeIPv4InterfaceAddress
 }
@@ -2205,13 +2254,14 @@ func (l *LinkDescriptorIPv4InterfaceAddress) deserialize(b []byte) error {
 	return nil
 }
 
-// LinkDescriptorIPv4NeighborAddress is a link descriptor contained in a bgp-ls link nlri
+// LinkDescriptorIPv4NeighborAddress is a link descriptor contained in a bgp-ls link nlri.
+//
 // https://tools.ietf.org/html/rfc5305#section-3.3
 type LinkDescriptorIPv4NeighborAddress struct {
 	Address net.IP
 }
 
-// Code returns the appropriate LinkDescriptorCode for LinkDescriptorIPv4NeighborAddress
+// Code returns the appropriate LinkDescriptorCode for LinkDescriptorIPv4NeighborAddress.
 func (l *LinkDescriptorIPv4NeighborAddress) Code() LinkDescriptorCode {
 	return LinkDescriptorCodeIPv4NeighborAddress
 }
@@ -2238,12 +2288,14 @@ func (l *LinkDescriptorIPv4NeighborAddress) deserialize(b []byte) error {
 	return nil
 }
 
-// LinkDescriptorIPv6InterfaceAddress is a link descriptor contained in a bgp-ls link nlri
+// LinkDescriptorIPv6InterfaceAddress is a link descriptor contained in a bgp-ls link nlri.
+//
+// https://tools.ietf.org/html/rfc6119#section-4.2
 type LinkDescriptorIPv6InterfaceAddress struct {
 	Address net.IP
 }
 
-// Code returns the appropriate LinkDescriptorCode for LinkDescriptorIPv6InterfaceAddress
+// Code returns the appropriate LinkDescriptorCode for LinkDescriptorIPv6InterfaceAddress.
 func (l *LinkDescriptorIPv6InterfaceAddress) Code() LinkDescriptorCode {
 	return LinkDescriptorCodeIPv6InterfaceAddress
 }
@@ -2270,13 +2322,14 @@ func (l *LinkDescriptorIPv6InterfaceAddress) deserialize(b []byte) error {
 	return nil
 }
 
-// LinkDescriptorIPv6NeighborAddress is a link descriptor contained in a bgp-ls link nlri
+// LinkDescriptorIPv6NeighborAddress is a link descriptor contained in a bgp-ls link nlri.
+//
 // https://tools.ietf.org/html/rfc6119#section-4.3
 type LinkDescriptorIPv6NeighborAddress struct {
 	Address net.IP
 }
 
-// Code returns the appropriate LinkDescriptorCode for LinkDescriptorIPv6NeighborAddress
+// Code returns the appropriate LinkDescriptorCode for LinkDescriptorIPv6NeighborAddress.
 func (l *LinkDescriptorIPv6NeighborAddress) Code() LinkDescriptorCode {
 	return LinkDescriptorCodeIPv6NeighborAddress
 }
@@ -2341,13 +2394,14 @@ func deserializeMultiTopologyIDs(b []byte) ([]uint16, error) {
 	return ids, nil
 }
 
-// LinkDescriptorMultiTopologyID is a link descriptor contained in a bgp-ls link nlri
+// LinkDescriptorMultiTopologyID is a link descriptor contained in a bgp-ls link nlri.
+//
 // https://tools.ietf.org/html/rfc7752#section-3.2.1.5
 type LinkDescriptorMultiTopologyID struct {
 	IDs []uint16
 }
 
-// Code returns the appropriate LinkDescriptorCode for LinkDescriptorMultiTopologyID
+// Code returns the appropriate LinkDescriptorCode for LinkDescriptorMultiTopologyID.
 func (l *LinkDescriptorMultiTopologyID) Code() LinkDescriptorCode {
 	return LinkDescriptorCodeMultiTopologyID
 }
@@ -2362,7 +2416,8 @@ func (l *LinkDescriptorMultiTopologyID) deserialize(b []byte) error {
 	return nil
 }
 
-// LinkStateNlriLink is a link state NLRI
+// LinkStateNlriLink is a link state NLRI.
+//
 // https://tools.ietf.org/html/rfc7752#section-3.2 figure 8
 type LinkStateNlriLink struct {
 	ProtocolID            LinkStateNlriProtocolID
@@ -2464,7 +2519,8 @@ func (l *LinkStateNlriLink) deserialize(b []byte) error {
 	return nil
 }
 
-// LinkStateNlriPrefix is a link state NLRI
+// LinkStateNlriPrefix is a link state NLRI.
+//
 // https://tools.ietf.org/html/rfc7752#section-3.2 figure 9
 type LinkStateNlriPrefix struct {
 	ProtocolID           LinkStateNlriProtocolID
@@ -2539,13 +2595,15 @@ func (l *LinkStateNlriPrefix) deserialize(b []byte) error {
 	return nil
 }
 
-// PrefixDescriptor is a bgp-ls prefix descriptor
+// PrefixDescriptor is a bgp-ls prefix descriptor.
+//
 // https://tools.ietf.org/html/rfc7752#section-3.2.3
 type PrefixDescriptor interface {
 	Code() PrefixDescriptorCode
 }
 
-// PrefixDescriptorCode describes the type of prefix descriptor
+// PrefixDescriptorCode describes the type of prefix descriptor.
+//
 // https://tools.ietf.org/html/rfc7752#section-3.2.3
 type PrefixDescriptorCode uint16
 
@@ -2617,13 +2675,14 @@ func deserializePrefixDescriptors(id LinkStateNlriProtocolID, b []byte) ([]Prefi
 	return descriptors, nil
 }
 
-// PrefixDescriptorMultiTopologyID is a prefix descriptor contained in a bgp-ls nlri
+// PrefixDescriptorMultiTopologyID is a prefix descriptor contained in a bgp-ls nlri.
+//
 // https://tools.ietf.org/html/rfc7752#section-3.2.1.5
 type PrefixDescriptorMultiTopologyID struct {
 	IDs []uint16
 }
 
-// Code returns the appropriate PrefixDescriptorCode for PrefixDescriptorMultiTopologyID
+// Code returns the appropriate PrefixDescriptorCode for PrefixDescriptorMultiTopologyID.
 func (p *PrefixDescriptorMultiTopologyID) Code() PrefixDescriptorCode {
 	return PrefixDescriptorCodeMultiTopologyID
 }
@@ -2638,13 +2697,15 @@ func (p *PrefixDescriptorMultiTopologyID) deserialize(b []byte) error {
 	return nil
 }
 
-// PrefixDescriptorOspfRouteType is a prefix descriptor contained in a bgp-ls nlri
+// PrefixDescriptorOspfRouteType is a prefix descriptor contained in a bgp-ls nlri.
+//
 // https://tools.ietf.org/html/rfc7752#section-3.2.3.1
 type PrefixDescriptorOspfRouteType struct {
 	RouteType OspfRouteType
 }
 
-// OspfRouteType describes the type of ospf route
+// OspfRouteType describes the type of ospf route.
+//
 // https://tools.ietf.org/html/rfc7752#section-3.2.3.1
 type OspfRouteType uint8
 
@@ -2659,7 +2720,7 @@ const (
 	OspfRouteTypeNSSA2
 )
 
-// Code returns the appropriate PrefixDescriptorCode for PrefixDescriptorOspfRouteType
+// Code returns the appropriate PrefixDescriptorCode for PrefixDescriptorOspfRouteType.
 func (p *PrefixDescriptorOspfRouteType) Code() PrefixDescriptorCode {
 	return PrefixDescriptorCodeOspfRouteType
 }
@@ -2686,14 +2747,15 @@ func (p *PrefixDescriptorOspfRouteType) deserialize(b []byte) error {
 	return nil
 }
 
-// PrefixDescriptorIPReachabilityInfo is a prefix descriptor contained in a bgp-ls nlri
+// PrefixDescriptorIPReachabilityInfo is a prefix descriptor contained in a bgp-ls nlri.
+//
 // https://tools.ietf.org/html/rfc7752#section-3.2.3.2
 type PrefixDescriptorIPReachabilityInfo struct {
 	PrefixLength uint8
 	Prefix       net.IP
 }
 
-// Code returns the appropriate PrefixDescriptorCode for PrefixDescriptorIPReachabilityInfo
+// Code returns the appropriate PrefixDescriptorCode for PrefixDescriptorIPReachabilityInfo.
 func (p *PrefixDescriptorIPReachabilityInfo) Code() PrefixDescriptorCode {
 	return PrefixDescriptorCodeIPReachabilityInfo
 }
@@ -2719,19 +2781,20 @@ func (p *PrefixDescriptorIPReachabilityInfo) deserialize(b []byte) error {
 	return nil
 }
 
-// PathAttrOrigin is a path attribute
+// PathAttrOrigin is a path attribute.
+//
 // https://tools.ietf.org/html/rfc4271#section-5.1.1
 type PathAttrOrigin struct {
 	f      PathAttrFlags
 	Origin OriginCode
 }
 
-// Flags returns the PathAttrFlags for PathAttrOrigin
+// Flags returns the PathAttrFlags for PathAttrOrigin.
 func (o *PathAttrOrigin) Flags() PathAttrFlags {
 	return o.f
 }
 
-// Type returns the appropriate PathAttrType for PathAttrOrigin
+// Type returns the appropriate PathAttrType for PathAttrOrigin.
 func (o *PathAttrOrigin) Type() PathAttrType {
 	return PathAttrOriginType
 }
@@ -2764,7 +2827,8 @@ func (o *PathAttrOrigin) deserialize(flags PathAttrFlags, b []byte) error {
 	return nil
 }
 
-// OriginCode describes the type of origin in the origin attribute
+// OriginCode describes the type of origin in the origin attribute.
+//
 // https://tools.ietf.org/html/rfc4271#section-5.1.1
 type OriginCode uint8
 
@@ -2788,25 +2852,26 @@ func (o OriginCode) String() string {
 	}
 }
 
-// AsPathSegment is contained in an as path attribute
+// AsPathSegment is contained in an as path attribute.
 type AsPathSegment struct {
 	IsSequence bool
 	Set        []uint16
 }
 
-// PathAttrAsPath is a path attribute
+// PathAttrAsPath is a path attribute.
+//
 // https://tools.ietf.org/html/rfc4271#section-5.1.2
 type PathAttrAsPath struct {
 	f        PathAttrFlags
 	Segments []AsPathSegment
 }
 
-// Flags returns the appropriate PathAttrFlags for PathAttrAsPath
+// Flags returns the appropriate PathAttrFlags for PathAttrAsPath.
 func (a *PathAttrAsPath) Flags() PathAttrFlags {
 	return a.f
 }
 
-// Type returns the appropriate PathAttrType for PathAttrAsPath
+// Type returns the appropriate PathAttrType for PathAttrAsPath.
 func (a *PathAttrAsPath) Type() PathAttrType {
 	return PathAttrAsPathType
 }
@@ -2862,19 +2927,20 @@ func (a *PathAttrAsPath) deserialize(f PathAttrFlags, b []byte) error {
 	return nil
 }
 
-// PathAttrLocalPref is a path attribute
+// PathAttrLocalPref is a path attribute.
+//
 // https://tools.ietf.org/html/rfc4271#section-5.1.5
 type PathAttrLocalPref struct {
 	f          PathAttrFlags
 	Preference int
 }
 
-// Flags returns the PathAttrFlags for PathAttrLocalPref
+// Flags returns the PathAttrFlags for PathAttrLocalPref.
 func (p *PathAttrLocalPref) Flags() PathAttrFlags {
 	return p.f
 }
 
-// Type returns the appropriate PathAttrType for PathAttrLocalPref
+// Type returns the appropriate PathAttrType for PathAttrLocalPref.
 func (p *PathAttrLocalPref) Type() PathAttrType {
 	return PathAttrLocalPrefType
 }
