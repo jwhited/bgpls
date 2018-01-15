@@ -49,9 +49,31 @@ func (u *UpdateMessage) MessageType() MessageType {
 	return UpdateMessageType
 }
 
-// noop
 func (u *UpdateMessage) serialize() ([]byte, error) {
-	return []byte{}, nil
+	buff := make([]byte, 4)
+
+	// withdrawn routes len
+	binary.BigEndian.PutUint16(buff[0:2], 0)
+
+	params := make([]byte, 0, 512)
+	for _, p := range u.PathAttrs {
+		b, err := p.serialize()
+		if err != nil {
+			return nil, err
+		}
+
+		params = append(params, b...)
+	}
+
+	// path attribute length
+	binary.BigEndian.PutUint16(buff[2:4], uint16(len(params)))
+
+	// path attributes
+	buff = append(buff, params...)
+
+	buff = prependHeader(buff, UpdateMessageType)
+
+	return buff, nil
 }
 
 func (u *UpdateMessage) deserialize(b []byte) error {
@@ -247,6 +269,36 @@ func validatePathAttrFlags(f PathAttrFlags, c pathAttrCategory) error {
 	}
 }
 
+/*
+	0                   1
+	0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5
+	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+	|  Attr. Flags  |Attr. Type Code|
+	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+	The high-order bit (bit 0) of the Attribute Flags octet is the
+	Optional bit.  It defines whether the attribute is optional (if
+	set to 1) or well-known (if set to 0).
+
+	The second high-order bit (bit 1) of the Attribute Flags octet
+	is the Transitive bit.  It defines whether an optional
+	attribute is transitive (if set to 1) or non-transitive (if set
+	to 0).
+
+	For well-known attributes, the Transitive bit MUST be set to 1.
+	(See Section 5 for a discussion of transitive attributes.)
+
+	The third high-order bit (bit 2) of the Attribute Flags octet
+	is the Partial bit.  It defines whether the information
+	contained in the optional transitive attribute is partial (if
+	set to 1) or complete (if set to 0).  For well-known attributes
+	and for optional non-transitive attributes, the Partial bit
+	MUST be set to 0.
+
+	The fourth high-order bit (bit 3) of the Attribute Flags octet
+	is the Extended Length bit.  It defines whether the Attribute
+	Length is one octet (if set to 0) or two octets (if set to 1).
+*/
 func pathAttrFlagsFromByte(b uint8) (PathAttrFlags, error) {
 	flags := PathAttrFlags{}
 	flags.Optional = (128 & b) != 0
@@ -265,8 +317,26 @@ type PathAttrFlags struct {
 	ExtendedLength bool
 }
 
+func (f *PathAttrFlags) serialize() ([]byte, error) {
+	var val uint8
+	if f.Optional {
+		val += 128
+	}
+	if f.Transitive {
+		val += 64
+	}
+	if f.Partial {
+		val += 32
+	}
+	if f.ExtendedLength {
+		val += 16
+	}
+	return []byte{val}, nil
+}
+
 // PathAttr is a bgp path attribute.
 type PathAttr interface {
+	serialize() ([]byte, error)
 	Flags() PathAttrFlags
 	Type() PathAttrType
 }
@@ -530,6 +600,11 @@ func (p *PathAttrLinkState) deserialize(f PathAttrFlags, b []byte) error {
 	}
 
 	return nil
+}
+
+// TODO: serialize PathAttrLinkState
+func (p *PathAttrLinkState) serialize() ([]byte, error) {
+	return nil, nil
 }
 
 // NodeAttrCode describes the type of node attribute contained in a bgp-ls attribute
@@ -1425,6 +1500,11 @@ func (p *PathAttrMpReach) deserialize(f PathAttrFlags, b []byte) error {
 	return nil
 }
 
+// TODO: serialize PathAttrMpReach
+func (p *PathAttrMpReach) serialize() ([]byte, error) {
+	return nil, nil
+}
+
 // Flags returns the PathAttrFlags for PathAttrMpReach.
 func (p *PathAttrMpReach) Flags() PathAttrFlags {
 	return p.f
@@ -1482,6 +1562,11 @@ func (p *PathAttrMpUnreach) deserialize(f PathAttrFlags, b []byte) error {
 	}
 
 	return nil
+}
+
+// TODO: serialize PathAttrMpUnreach
+func (p *PathAttrMpUnreach) serialize() ([]byte, error) {
+	return nil, nil
 }
 
 // Flags returns the PathAttrFlags for PathAttrMpUnreach.
@@ -2799,7 +2884,7 @@ func (o *PathAttrOrigin) Type() PathAttrType {
 	return PathAttrOriginType
 }
 
-// noop
+// TODO: serialize PathAttrOrigin
 func (o *PathAttrOrigin) serialize() ([]byte, error) {
 	return nil, nil
 }
@@ -2876,7 +2961,7 @@ func (a *PathAttrAsPath) Type() PathAttrType {
 	return PathAttrAsPathType
 }
 
-// noop
+// TODO: serialize PathAttrAsPath
 func (a *PathAttrAsPath) serialize() ([]byte, error) {
 	return nil, nil
 }
@@ -2945,7 +3030,7 @@ func (p *PathAttrLocalPref) Type() PathAttrType {
 	return PathAttrLocalPrefType
 }
 
-// noop
+// TODO: serialize PathAttrLocalPref
 func (p *PathAttrLocalPref) serialize() ([]byte, error) {
 	return nil, nil
 }
