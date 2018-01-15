@@ -245,6 +245,25 @@ func (f *standardFSM) active() FSMState {
 	}
 }
 
+func (f *standardFSM) handleReadErr(err error, nextState FSMState) FSMState {
+	if err, ok := err.(*errWithNotification); ok {
+		f.sendNotification(err.code, err.subcode, err.data)
+	}
+
+	event := newEventNeighborErr(f.neighbor.config(), err)
+	select {
+	case f.events <- event:
+	case <-f.disable:
+		f.drainHoldTimer()
+		f.cleanupConn()
+		return DisabledState
+	}
+
+	f.drainHoldTimer()
+	f.cleanupConn()
+	return nextState
+}
+
 func (f *standardFSM) read() {
 	defer close(f.readerClosed)
 
@@ -300,22 +319,7 @@ func (f *standardFSM) openSent() FSMState {
 		f.cleanupConn()
 		return DisabledState
 	case err := <-f.readerErr:
-		if err, ok := err.(*errWithNotification); ok {
-			f.sendNotification(err.code, err.subcode, err.data)
-		}
-
-		event := newEventNeighborErr(f.neighbor.config(), err)
-		select {
-		case f.events <- event:
-		case <-f.disable:
-			f.drainHoldTimer()
-			f.cleanupConn()
-			return DisabledState
-		}
-
-		f.drainHoldTimer()
-		f.cleanupConn()
-		return ActiveState
+		return f.handleReadErr(err, ActiveState)
 	case <-f.holdTimer.C:
 		f.sendHoldTimerExpired()
 
@@ -408,22 +412,7 @@ func (f *standardFSM) openConfirm() FSMState {
 			f.cleanupConn()
 			return DisabledState
 		case err := <-f.readerErr:
-			if err, ok := err.(*errWithNotification); ok {
-				f.sendNotification(err.code, err.subcode, err.data)
-			}
-
-			event := newEventNeighborErr(f.neighbor.config(), err)
-			select {
-			case f.events <- event:
-			case <-f.disable:
-				f.drainHoldTimer()
-				f.cleanupConn()
-				return DisabledState
-			}
-
-			f.drainHoldTimer()
-			f.cleanupConn()
-			return IdleState
+			return f.handleReadErr(err, IdleState)
 		case <-f.holdTimer.C:
 			f.sendHoldTimerExpired()
 
@@ -471,22 +460,7 @@ func (f *standardFSM) established() FSMState {
 			f.cleanupConn()
 			return DisabledState
 		case err := <-f.readerErr:
-			if err, ok := err.(*errWithNotification); ok {
-				f.sendNotification(err.code, err.subcode, err.data)
-			}
-
-			event := newEventNeighborErr(f.neighbor.config(), err)
-			select {
-			case f.events <- event:
-			case <-f.disable:
-				f.drainHoldTimer()
-				f.cleanupConn()
-				return DisabledState
-			}
-
-			f.drainHoldTimer()
-			f.cleanupConn()
-			return IdleState
+			return f.handleReadErr(err, IdleState)
 		case <-f.holdTimer.C:
 			f.sendHoldTimerExpired()
 
