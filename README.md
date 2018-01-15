@@ -9,4 +9,4 @@ A BGP Link-State collector library for Go 1.9+.
 [RFC7752](https://tools.ietf.org/html/rfc7752)
 
 ## Usage
-[Collector example](https://godoc.org/pkg/github.com/jwhited/bgpls/#example_Collector)
+[Collector example](https://godoc.org/github.com/jwhited/bgpls/#example-Collector)
