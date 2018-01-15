@@ -245,45 +245,6 @@ func (f *standardFSM) active() FSMState {
 	}
 }
 
-func messageFromBytes(t MessageType, b []byte) (Message, error) {
-	switch t {
-	case OpenMessageType:
-		m := &openMessage{}
-		err := m.deserialize(b)
-		if err != nil {
-			return nil, err
-		}
-		return m, nil
-	case KeepAliveMessageType:
-		m := &keepAliveMessage{}
-		err := m.deserialize(b)
-		if err != nil {
-			return nil, err
-		}
-		return m, nil
-	case UpdateMessageType:
-		m := &UpdateMessage{}
-		err := m.deserialize(b)
-		if err != nil {
-			return nil, err
-		}
-		return m, nil
-	case NotificationMessageType:
-		m := &NotificationMessage{}
-		err := m.deserialize(b)
-		if err != nil {
-			return nil, err
-		}
-		return m, nil
-	default:
-		return nil, &errWithNotification{
-			error:   fmt.Errorf("invalid message type %s", t),
-			code:    NotifErrCodeMessageHeader,
-			subcode: NotifErrSubcodeBadType,
-		}
-	}
-}
-
 func (f *standardFSM) read() {
 	defer close(f.readerClosed)
 
@@ -303,78 +264,21 @@ func (f *standardFSM) read() {
 			}
 			buff = buff[:n]
 
-			for {
-				if len(buff) < 19 {
-					err := &errWithNotification{
-						error:   errors.New("received message < 19 bytes"),
-						code:    NotifErrCodeMessageHeader,
-						subcode: NotifErrSubcodeBadLength,
-					}
-
-					select {
-					case f.readerErr <- err:
-					case <-f.closeReader:
-					}
-
-					return
-				}
-
-				for i := 0; i < 16; i++ {
-					if buff[i] != 0xFF {
-						err := &errWithNotification{
-							error:   errors.New("invalid message header marker value"),
-							code:    NotifErrCodeMessageHeader,
-							subcode: NotifErrSubcodeConnNotSynch,
-						}
-
-						select {
-						case f.readerErr <- err:
-						case <-f.closeReader:
-						}
-
-						return
-					}
-				}
-
-				msgLen := binary.BigEndian.Uint16(buff[16:18])
-				if len(buff) < int(msgLen) {
-					err := &errWithNotification{
-						error:   errors.New("message header length invalid"),
-						code:    NotifErrCodeMessageHeader,
-						subcode: NotifErrSubcodeBadLength,
-					}
-
-					select {
-					case f.readerErr <- err:
-					case <-f.closeReader:
-					}
-
-					return
-				}
-
-				msgType := MessageType(buff[18])
-				msgBytes := buff[19:msgLen]
-
-				msg, err := messageFromBytes(msgType, msgBytes)
-				if err != nil {
-					select {
-					case f.readerErr <- err:
-					case <-f.closeReader:
-					}
-
-					return
-				}
-
+			msgs, err := messagesFromBytes(buff)
+			if err != nil {
 				select {
-				case f.msgCh <- msg:
+				case f.readerErr <- err:
+				case <-f.closeReader:
+				}
+
+				return
+			}
+
+			for _, m := range msgs {
+				select {
+				case f.msgCh <- m:
 				case <-f.closeReader:
 					return
-				}
-
-				if len(buff) > int(msgLen) {
-					buff = buff[msgLen:]
-				} else {
-					break
 				}
 			}
 		}
