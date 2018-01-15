@@ -16,26 +16,26 @@ func TestOpenMessage(t *testing.T) {
 
 	o, err := newOpenMessage(uint32(asn), holdTime, bgpID)
 	if err != nil {
-		t.Error(err)
+		t.Fatal(err)
 	}
 
 	b, err := o.serialize()
 	if err != nil {
-		t.Error(err)
+		t.Fatal(err)
 	}
 
 	m, err := messagesFromBytes(b)
 	if err != nil {
-		t.Error(err)
+		t.Fatal(err)
 	}
 
 	if len(m) != 1 {
-		t.Errorf("invalid number of messages deserialized: %d", len(m))
+		t.Fatalf("invalid number of messages deserialized: %d", len(m))
 	}
 
 	f, ok := m[0].(*openMessage)
 	if !ok {
-		t.Error("not an open message")
+		t.Fatal("not an open message")
 	}
 
 	assert.Equal(t, asn, f.asn)
@@ -44,4 +44,31 @@ func TestOpenMessage(t *testing.T) {
 	assert.Equal(t, f.MessageType(), OpenMessageType)
 	assert.Equal(t, len(o.optParams), len(f.optParams))
 	assert.Equal(t, f.version, uint8(4))
+
+	if len(f.optParams) != 1 {
+		t.Fatal("missing optional param")
+	}
+
+	p, ok := f.optParams[0].(*capabilityOptParam)
+	if !ok {
+		t.Fatal("not capability optional param")
+	}
+
+	if len(p.caps) != 2 {
+		t.Fatal("missing capabilities")
+	}
+
+	q, ok := p.caps[0].(*capFourOctetAs)
+	if !ok {
+		t.Fatal("missing four octet ASN capability")
+	}
+	assert.Equal(t, q.asn, uint32(asn))
+
+	r, ok := p.caps[1].(*capMultiproto)
+	if !ok {
+		t.Fatal("missing multiprotocol capability")
+	}
+	assert.Equal(t, r.capabilityCode(), capCodeMultiproto)
+	assert.Equal(t, r.afi, BgpLsAFI)
+	assert.Equal(t, r.safi, BgpLsSAFI)
 }
