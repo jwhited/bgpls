@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 )
 
@@ -2884,9 +2885,21 @@ func (o *PathAttrOrigin) Type() PathAttrType {
 	return PathAttrOriginType
 }
 
-// TODO: serialize PathAttrOrigin
 func (o *PathAttrOrigin) serialize() ([]byte, error) {
-	return nil, nil
+	o.f = PathAttrFlags{
+		Transitive: true,
+	}
+
+	flags, err := o.f.serialize()
+	if err != nil {
+		return nil, err
+	}
+
+	if len(flags) != 1 {
+		return nil, errors.New("invalid path attr flags length")
+	}
+
+	return []byte{flags[0], byte(PathAttrOriginType), byte(1), byte(o.Origin)}, nil
 }
 
 func (o *PathAttrOrigin) deserialize(flags PathAttrFlags, b []byte) error {
@@ -2943,6 +2956,22 @@ type AsPathSegment struct {
 	Set        []uint16
 }
 
+func (a *AsPathSegment) serialize() ([]byte, error) {
+	b := make([]byte, 2+(len(a.Set)*2))
+	if a.IsSequence {
+		b[0] = uint8(2)
+	} else {
+		b[0] = uint8(1)
+	}
+	b[1] = uint8(len(a.Set))
+
+	for i, s := range a.Set {
+		binary.BigEndian.PutUint16(b[i*2+2:i*2+4], s)
+	}
+
+	return b, nil
+}
+
 // PathAttrAsPath is a path attribute.
 //
 // https://tools.ietf.org/html/rfc4271#section-5.1.2
@@ -2961,9 +2990,46 @@ func (a *PathAttrAsPath) Type() PathAttrType {
 	return PathAttrAsPathType
 }
 
-// TODO: serialize PathAttrAsPath
 func (a *PathAttrAsPath) serialize() ([]byte, error) {
-	return nil, nil
+	a.f = PathAttrFlags{
+		Transitive: true,
+	}
+
+	segments := make([]byte, 0, 512)
+	for _, s := range a.Segments {
+		b, err := s.serialize()
+		if err != nil {
+			return nil, err
+		}
+		segments = append(segments, b...)
+	}
+
+	if len(segments) > math.MaxUint8 {
+		a.f.ExtendedLength = true
+	}
+	flags, err := a.f.serialize()
+	if err != nil {
+		return nil, err
+	}
+	if len(flags) != 1 {
+		return nil, errors.New("invalid path attr flags length")
+	}
+
+	b := make([]byte, 2)
+	b[0] = flags[0]
+	b[1] = byte(PathAttrAsPathType)
+
+	if a.f.ExtendedLength {
+		attrLen := make([]byte, 2)
+		binary.BigEndian.PutUint16(attrLen, uint16(len(segments)))
+		b = append(b, attrLen...)
+	} else {
+		b = append(b, uint8(len(segments)))
+	}
+
+	b = append(b, segments...)
+
+	return b, nil
 }
 
 func (a *PathAttrAsPath) deserialize(f PathAttrFlags, b []byte) error {
@@ -3017,7 +3083,7 @@ func (a *PathAttrAsPath) deserialize(f PathAttrFlags, b []byte) error {
 // https://tools.ietf.org/html/rfc4271#section-5.1.5
 type PathAttrLocalPref struct {
 	f          PathAttrFlags
-	Preference int
+	Preference uint32
 }
 
 // Flags returns the PathAttrFlags for PathAttrLocalPref.
@@ -3030,9 +3096,26 @@ func (p *PathAttrLocalPref) Type() PathAttrType {
 	return PathAttrLocalPrefType
 }
 
-// TODO: serialize PathAttrLocalPref
 func (p *PathAttrLocalPref) serialize() ([]byte, error) {
-	return nil, nil
+	p.f = PathAttrFlags{
+		Transitive: true,
+	}
+
+	flags, err := p.f.serialize()
+	if err != nil {
+		return nil, err
+	}
+
+	if len(flags) != 1 {
+		return nil, errors.New("invalid path attr flags length")
+	}
+
+	b := make([]byte, 7)
+	b[0] = flags[0]
+	b[1] = byte(PathAttrLocalPrefType)
+	b[2] = byte(4)
+	binary.BigEndian.PutUint32(b[3:7], p.Preference)
+	return b, nil
 }
 
 func (p *PathAttrLocalPref) deserialize(f PathAttrFlags, b []byte) error {
@@ -3045,7 +3128,7 @@ func (p *PathAttrLocalPref) deserialize(f PathAttrFlags, b []byte) error {
 		}
 	}
 
-	p.Preference = int(binary.BigEndian.Uint32(b))
+	p.Preference = binary.BigEndian.Uint32(b)
 
 	return nil
 }
