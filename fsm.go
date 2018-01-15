@@ -245,7 +245,7 @@ func (f *standardFSM) active() FSMState {
 	}
 }
 
-func (f *standardFSM) handleReadErr(err error, nextState FSMState) FSMState {
+func (f *standardFSM) handleErr(err error, nextState FSMState) FSMState {
 	if err, ok := err.(*errWithNotification); ok {
 		f.sendNotification(err.code, err.subcode, err.data)
 	}
@@ -260,6 +260,21 @@ func (f *standardFSM) handleReadErr(err error, nextState FSMState) FSMState {
 	}
 
 	f.drainHoldTimer()
+	f.cleanupConn()
+	return nextState
+}
+
+func (f *standardFSM) handleHoldTimerExpired(nextState FSMState) FSMState {
+	f.sendHoldTimerExpired()
+
+	event := newEventNeighborHoldTimerExpired(f.neighbor.config())
+	select {
+	case f.events <- event:
+	case <-f.disable:
+		f.cleanupConn()
+		return DisabledState
+	}
+
 	f.cleanupConn()
 	return nextState
 }
@@ -319,20 +334,9 @@ func (f *standardFSM) openSent() FSMState {
 		f.cleanupConn()
 		return DisabledState
 	case err := <-f.readerErr:
-		return f.handleReadErr(err, ActiveState)
+		return f.handleErr(err, ActiveState)
 	case <-f.holdTimer.C:
-		f.sendHoldTimerExpired()
-
-		event := newEventNeighborHoldTimerExpired(f.neighbor.config())
-		select {
-		case f.events <- event:
-		case <-f.disable:
-			f.cleanupConn()
-			return DisabledState
-		}
-
-		f.cleanupConn()
-		return IdleState
+		return f.handleHoldTimerExpired(IdleState)
 	case m := <-f.msgCh:
 		open, isOpen := m.(*openMessage)
 		if !isOpen {
@@ -355,37 +359,12 @@ func (f *standardFSM) openSent() FSMState {
 
 		err := f.validateOpen(open)
 		if err != nil {
-			event := newEventNeighborErr(f.neighbor.config(), fmt.Errorf("error validating open message: %v", err))
-			select {
-			case f.events <- event:
-			case <-f.disable:
-				f.drainHoldTimer()
-				f.cleanupConn()
-				return DisabledState
-			}
-
-			if err, ok := err.(*errWithNotification); ok {
-				f.sendNotification(err.code, err.subcode, err.data)
-			}
-			f.drainHoldTimer()
-			f.cleanupConn()
-			return IdleState
+			return f.handleErr(err, IdleState)
 		}
 
 		err = f.sendKeepAlive()
 		if err != nil {
-			event := newEventNeighborErr(f.neighbor.config(), fmt.Errorf("error sending keepalive: %v", err))
-			select {
-			case f.events <- event:
-			case <-f.disable:
-				f.drainHoldTimer()
-				f.cleanupConn()
-				return DisabledState
-			}
-
-			f.drainHoldTimer()
-			f.cleanupConn()
-			return IdleState
+			return f.handleErr(err, IdleState)
 		}
 
 		f.drainAndResetHoldTimer()
@@ -412,35 +391,13 @@ func (f *standardFSM) openConfirm() FSMState {
 			f.cleanupConn()
 			return DisabledState
 		case err := <-f.readerErr:
-			return f.handleReadErr(err, IdleState)
+			return f.handleErr(err, IdleState)
 		case <-f.holdTimer.C:
-			f.sendHoldTimerExpired()
-
-			event := newEventNeighborHoldTimerExpired(f.neighbor.config())
-			select {
-			case f.events <- event:
-			case <-f.disable:
-				f.cleanupConn()
-				return DisabledState
-			}
-
-			f.cleanupConn()
-			return IdleState
+			return f.handleHoldTimerExpired(IdleState)
 		case m := <-f.msgCh:
 			_, isKeepAlive := m.(*keepAliveMessage)
 			if !isKeepAlive {
-				event := newEventNeighborErr(f.neighbor.config(), fmt.Errorf("message received in openConfirm state is not a keepalive, type: %s", m.MessageType()))
-				select {
-				case f.events <- event:
-				case <-f.disable:
-					f.drainHoldTimer()
-					f.cleanupConn()
-					return DisabledState
-				}
-
-				f.drainHoldTimer()
-				f.cleanupConn()
-				return IdleState
+				return f.handleErr(fmt.Errorf("message received in openConfirm state is not a keepalive, type: %s", m.MessageType()), IdleState)
 			}
 
 			f.drainAndResetHoldTimer()
@@ -460,35 +417,13 @@ func (f *standardFSM) established() FSMState {
 			f.cleanupConn()
 			return DisabledState
 		case err := <-f.readerErr:
-			return f.handleReadErr(err, IdleState)
+			return f.handleErr(err, IdleState)
 		case <-f.holdTimer.C:
-			f.sendHoldTimerExpired()
-
-			event := newEventNeighborHoldTimerExpired(f.neighbor.config())
-			select {
-			case f.events <- event:
-			case <-f.disable:
-				f.cleanupConn()
-				return DisabledState
-			}
-
-			f.cleanupConn()
-			return IdleState
+			return f.handleHoldTimerExpired(IdleState)
 		case <-f.keepAliveTimer.C:
 			err := f.sendKeepAlive()
 			if err != nil {
-				event := newEventNeighborErr(f.neighbor.config(), fmt.Errorf("error sending keepalive: %v", err))
-				select {
-				case f.events <- event:
-				case <-f.disable:
-					f.drainHoldTimer()
-					f.cleanupConn()
-					return DisabledState
-				}
-
-				f.drainHoldTimer()
-				f.cleanupConn()
-				return IdleState
+				return f.handleErr(err, IdleState)
 			}
 			// does not need to be drained
 			f.keepAliveTimer.Reset(f.keepAliveTime)
