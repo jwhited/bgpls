@@ -3,7 +3,7 @@ A BGP Link-State collector library for Go 1.9+.
 
 **Documentation:** [![GoDoc](https://godoc.org/github.com/jwhited/bgpls?status.svg)](https://godoc.org/github.com/jwhited/bgpls)
 
-**Test Coverage:** [![Coverage Status](https://coveralls.io/repos/github/jwhited/bgpls/badge.svg?branch=master)](https://coveralls.io/github/jwhited/bgpls?branch=master)
+**Test Coverage:** [![codecov](https://codecov.io/gh/jwhited/bgpls/branch/master/graph/badge.svg)](https://codecov.io/gh/jwhited/bgpls)
 
 ## Supported RFCs
 [RFC7752](https://tools.ietf.org/html/rfc7752)
