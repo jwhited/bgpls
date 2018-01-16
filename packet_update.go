@@ -608,11 +608,6 @@ func (p *PathAttrLinkState) serialize() ([]byte, error) {
 		Optional: true,
 	}
 
-	flags, err := p.f.serialize()
-	if err != nil {
-		return nil, err
-	}
-
 	// node attrs
 	nodeAttrs := make([]byte, 0, 512)
 	for _, n := range p.NodeAttrs {
@@ -640,13 +635,17 @@ func (p *PathAttrLinkState) serialize() ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		linkAttrs = append(prefixAttrs, b...)
+		prefixAttrs = append(prefixAttrs, b...)
 	}
 
 	nodeAttrs = append(nodeAttrs, linkAttrs...)
 	nodeAttrs = append(nodeAttrs, prefixAttrs...)
 	if len(nodeAttrs) > math.MaxUint8 {
 		p.f.ExtendedLength = true
+	}
+	flags, err := p.f.serialize()
+	if err != nil {
+		return nil, err
 	}
 
 	b := make([]byte, 2)
@@ -662,6 +661,68 @@ func (p *PathAttrLinkState) serialize() ([]byte, error) {
 	b = append(b, nodeAttrs...)
 
 	return b, nil
+}
+
+// 2 octet type and 2 octet length
+func serializeBgpLsStringTLV(l uint16, s string) []byte {
+	val := reverseByteOrder([]byte(s))
+	b := make([]byte, 4)
+	binary.BigEndian.PutUint16(b[:2], l)
+	binary.BigEndian.PutUint16(b[2:], uint16(len(val)))
+	b = append(b, val...)
+	return b
+}
+
+// 2 octet type and 2 octet length
+func serializeBgpLsIPv4TLV(l uint16, a net.IP) ([]byte, error) {
+	b := make([]byte, 4)
+	binary.BigEndian.PutUint16(b[:2], l)
+	binary.BigEndian.PutUint16(b[2:], uint16(4))
+	addr := a.To4()
+	if addr == nil {
+		return nil, errors.New("invalid ipv4 address")
+	}
+	b = append(b, addr...)
+	return b, nil
+}
+
+// 2 octet type and 2 octet length
+func serializeBgpLsIPv6TLV(l uint16, a net.IP) ([]byte, error) {
+	b := make([]byte, 4)
+	binary.BigEndian.PutUint16(b[:2], l)
+	binary.BigEndian.PutUint16(b[2:], uint16(16))
+	addr := a.To16()
+	if addr == nil {
+		return nil, errors.New("invalid ipv4 address")
+	}
+	b = append(b, addr...)
+	return b, nil
+}
+
+func deserializeIPv4Addr(b []byte) (net.IP, error) {
+	if len(b) != 4 {
+		return nil, errors.New("invalid length for ipv4 address")
+	}
+
+	addr, err := bytesToIPAddress(b)
+	if err != nil {
+		return nil, fmt.Errorf("error deserializing ipv4 address: %v", err)
+	}
+
+	return addr, err
+}
+
+func deserializeIPv6Addr(b []byte) (net.IP, error) {
+	if len(b) != 16 {
+		return nil, errors.New("invalid length for ipv6 address")
+	}
+
+	addr, err := bytesToIPAddress(b)
+	if err != nil {
+		return nil, fmt.Errorf("error deserializing ipv6 address: %v", err)
+	}
+
+	return addr, err
 }
 
 // NodeAttrCode describes the type of node attribute contained in a bgp-ls attribute
@@ -708,9 +769,8 @@ func (n *NodeAttrMultiTopologyID) deserialize(b []byte) error {
 	return nil
 }
 
-// TODO: serialize
 func (n *NodeAttrMultiTopologyID) serialize() ([]byte, error) {
-	return nil, nil
+	return serializeMultiTopologyIDs(uint16(n.Code()), n.IDs)
 }
 
 // NodeAttrNodeFlagBits is a node attribute contained in a bgp-ls attribute.
@@ -825,12 +885,7 @@ func (n *NodeAttrNodeName) deserialize(b []byte) error {
 }
 
 func (n *NodeAttrNodeName) serialize() ([]byte, error) {
-	val := reverseByteOrder([]byte(n.Name))
-	b := make([]byte, 4)
-	binary.BigEndian.PutUint16(b[:2], uint16(n.Code()))
-	binary.BigEndian.PutUint16(b[2:], uint16(len(val)))
-	b = append(b, val...)
-	return b, nil
+	return serializeBgpLsStringTLV(uint16(n.Code()), n.Name), nil
 }
 
 // NodeAttrIsIsAreaID is a node attribute contained in a bgp-ls attribute.
@@ -846,17 +901,12 @@ func (n *NodeAttrIsIsAreaID) Code() NodeAttrCode {
 }
 
 func (n *NodeAttrIsIsAreaID) deserialize(b []byte) error {
-	if len(b) < 1 || len(b) > 4 {
+	if len(b) != 4 {
 		return &errWithNotification{
 			error:   errors.New("invalid length for is-is area ID node attribute"),
 			code:    NotifErrCodeUpdateMessage,
 			subcode: NotifErrSubcodeMalformedAttr,
 		}
-	}
-
-	// pad to 32 bits
-	for i := 0; i < 4-len(b); i++ {
-		b = append([]byte{0}, b...)
 	}
 
 	n.AreaID = binary.BigEndian.Uint32(b)
@@ -884,37 +934,20 @@ func (n *NodeAttrLocalIPv4RouterID) Code() NodeAttrCode {
 }
 
 func (n *NodeAttrLocalIPv4RouterID) deserialize(b []byte) error {
-	if len(b) != 4 {
-		return &errWithNotification{
-			error:   errors.New("invalid length for local ipv4 router ID node attribute"),
-			code:    NotifErrCodeUpdateMessage,
-			subcode: NotifErrSubcodeMalformedAttr,
-		}
-	}
-
-	addr, err := bytesToIPAddress(b)
+	addr, err := deserializeIPv4Addr(b)
 	if err != nil {
 		return &errWithNotification{
-			error:   fmt.Errorf("error deserializing local ipv4 router id node attribute: %v", err),
+			error:   fmt.Errorf("invalid ipv4 router ID node attribute: %v", err),
 			code:    NotifErrCodeUpdateMessage,
 			subcode: NotifErrSubcodeMalformedAttr,
 		}
 	}
-
 	n.Address = addr
 	return nil
 }
 
 func (n *NodeAttrLocalIPv4RouterID) serialize() ([]byte, error) {
-	b := make([]byte, 4, 8)
-	binary.BigEndian.PutUint16(b[:2], uint16(n.Code()))
-	binary.BigEndian.PutUint16(b[2:], 4)
-	addr := n.Address.To4()
-	if addr == nil {
-		return nil, errors.New("invalid address in local ipv4 router id node attribute")
-	}
-	b = append(b, addr...)
-	return b, nil
+	return serializeBgpLsIPv4TLV(uint16(n.Code()), n.Address)
 }
 
 // NodeAttrLocalIPv6RouterID is a node attribute contained in a bgp-ls attribute.
@@ -930,37 +963,20 @@ func (n *NodeAttrLocalIPv6RouterID) Code() NodeAttrCode {
 }
 
 func (n *NodeAttrLocalIPv6RouterID) deserialize(b []byte) error {
-	if len(b) != 16 {
-		return &errWithNotification{
-			error:   errors.New("invalid length for local ipv6 router ID node attribute"),
-			code:    NotifErrCodeUpdateMessage,
-			subcode: NotifErrSubcodeMalformedAttr,
-		}
-	}
-
-	addr, err := bytesToIPAddress(b)
+	addr, err := deserializeIPv6Addr(b)
 	if err != nil {
 		return &errWithNotification{
-			error:   fmt.Errorf("error deserializing local ipv6 router ID node attribute: %v", err),
+			error:   fmt.Errorf("invalid ipv6 router ID node attribute: %v", err),
 			code:    NotifErrCodeUpdateMessage,
 			subcode: NotifErrSubcodeMalformedAttr,
 		}
 	}
-
 	n.Address = addr
 	return nil
 }
 
 func (n *NodeAttrLocalIPv6RouterID) serialize() ([]byte, error) {
-	b := make([]byte, 4, 20)
-	binary.BigEndian.PutUint16(b[:2], uint16(n.Code()))
-	binary.BigEndian.PutUint16(b[2:], 16)
-	addr := n.Address.To16()
-	if addr == nil {
-		return nil, errors.New("invalid address in local ipv6 router id node attribute")
-	}
-	b = append(b, addr...)
-	return b, nil
+	return serializeBgpLsIPv6TLV(uint16(n.Code()), n.Address)
 }
 
 // LinkAttr is a link attribute contained in a bgp-ls attribute.
@@ -1004,37 +1020,20 @@ func (l *LinkAttrRemoteIPv4RouterID) Code() LinkAttrCode {
 }
 
 func (l *LinkAttrRemoteIPv4RouterID) deserialize(b []byte) error {
-	if len(b) != 4 {
-		return &errWithNotification{
-			error:   errors.New("invalid length for remote ipv4 router ID link attribute"),
-			code:    NotifErrCodeUpdateMessage,
-			subcode: NotifErrSubcodeMalformedAttr,
-		}
-	}
-
-	addr, err := bytesToIPAddress(b)
+	addr, err := deserializeIPv4Addr(b)
 	if err != nil {
 		return &errWithNotification{
-			error:   fmt.Errorf("error deserializing remote ipv4 router id link attribute: %v", err),
+			error:   fmt.Errorf("invalid ipv4 router ID link attribute: %v", err),
 			code:    NotifErrCodeUpdateMessage,
 			subcode: NotifErrSubcodeMalformedAttr,
 		}
 	}
-
 	l.Address = addr
 	return nil
 }
 
 func (l *LinkAttrRemoteIPv4RouterID) serialize() ([]byte, error) {
-	b := make([]byte, 4, 8)
-	binary.BigEndian.PutUint16(b[:2], uint16(l.Code()))
-	binary.BigEndian.PutUint16(b[2:], 4)
-	addr := l.Address.To4()
-	if addr == nil {
-		return nil, errors.New("invalid address in remote ipv4 router id link attribute")
-	}
-	b = append(b, addr...)
-	return b, nil
+	return serializeBgpLsIPv4TLV(uint16(l.Code()), l.Address)
 }
 
 // LinkAttrRemoteIPv6RouterID is a link attribute contained in a bgp-ls attribute.
@@ -1050,37 +1049,20 @@ func (l *LinkAttrRemoteIPv6RouterID) Code() LinkAttrCode {
 }
 
 func (l *LinkAttrRemoteIPv6RouterID) deserialize(b []byte) error {
-	if len(b) != 16 {
-		return &errWithNotification{
-			error:   errors.New("invalid length for remote ipv6 router ID link attribute"),
-			code:    NotifErrCodeUpdateMessage,
-			subcode: NotifErrSubcodeMalformedAttr,
-		}
-	}
-
-	addr, err := bytesToIPAddress(b)
+	addr, err := deserializeIPv6Addr(b)
 	if err != nil {
 		return &errWithNotification{
-			error:   fmt.Errorf("error deserializing remote ipv6 router id link attribute: %v", err),
+			error:   fmt.Errorf("invalid ipv6 remote router ID link attribute: %v", err),
 			code:    NotifErrCodeUpdateMessage,
 			subcode: NotifErrSubcodeMalformedAttr,
 		}
 	}
-
 	l.Address = addr
 	return nil
 }
 
 func (l *LinkAttrRemoteIPv6RouterID) serialize() ([]byte, error) {
-	b := make([]byte, 4, 20)
-	binary.BigEndian.PutUint16(b[:2], uint16(l.Code()))
-	binary.BigEndian.PutUint16(b[2:], 16)
-	addr := l.Address.To16()
-	if addr == nil {
-		return nil, errors.New("invalid address in remote ipv6 router id link attribute")
-	}
-	b = append(b, addr...)
-	return b, nil
+	return serializeBgpLsIPv6TLV(uint16(l.Code()), l.Address)
 }
 
 // LinkAttrAdminGroup is a link attribute contained in a bgp-ls attribute.
@@ -1557,9 +1539,16 @@ func (l *LinkAttrSharedRiskLinkGroup) deserialize(b []byte) error {
 	return nil
 }
 
-// TODO: serialize
 func (l *LinkAttrSharedRiskLinkGroup) serialize() ([]byte, error) {
-	return nil, nil
+	b := make([]byte, 4)
+	binary.BigEndian.PutUint16(b[:2], uint16(l.Code()))
+	binary.BigEndian.PutUint16(b[2:], uint16(len(l.Groups)*4))
+	for _, g := range l.Groups {
+		c := make([]byte, 4)
+		binary.BigEndian.PutUint32(c, g)
+		b = append(b, c...)
+	}
+	return b, nil
 }
 
 // LinkAttrOpaqueLinkAttr is a link attribute contained in a bgp-ls attribute.
@@ -1579,9 +1568,12 @@ func (l *LinkAttrOpaqueLinkAttr) deserialize(b []byte) error {
 	return nil
 }
 
-// TODO: serialize
 func (l *LinkAttrOpaqueLinkAttr) serialize() ([]byte, error) {
-	return nil, nil
+	b := make([]byte, 4)
+	binary.BigEndian.PutUint16(b[:2], uint16(l.Code()))
+	binary.BigEndian.PutUint16(b[2:], uint16(len(l.Data)))
+	b = append(b, l.Data...)
+	return b, nil
 }
 
 // LinkAttrLinkName is a link attribute contained in a bgp-ls attribute.
@@ -1602,9 +1594,8 @@ func (l *LinkAttrLinkName) deserialize(b []byte) error {
 	return nil
 }
 
-// TODO: serialize
 func (l *LinkAttrLinkName) serialize() ([]byte, error) {
-	return nil, nil
+	return serializeBgpLsStringTLV(uint16(l.Code()), l.Name), nil
 }
 
 // PrefixAttr is a prefix attribute contained in a bgp-ls attribute.
@@ -1671,9 +1662,23 @@ func (p *PrefixAttrIgpFlags) deserialize(b []byte) error {
 	return nil
 }
 
-// TODO: serialize
 func (p *PrefixAttrIgpFlags) serialize() ([]byte, error) {
-	return nil, nil
+	b := make([]byte, 5)
+	binary.BigEndian.PutUint16(b[:2], uint16(p.Code()))
+	binary.BigEndian.PutUint16(b[2:], uint16(1))
+	if p.IsIsDown {
+		b[4] += 128
+	}
+	if p.OspfNoUnicast {
+		b[4] += 64
+	}
+	if p.OspfLocalAddress {
+		b[4] += 32
+	}
+	if p.OspfPropagateNssa {
+		b[4] += 16
+	}
+	return b, nil
 }
 
 // PrefixAttrIgpRouteTag is a prefix attribute contained in a bgp-ls attribute.
@@ -1707,9 +1712,17 @@ func (p *PrefixAttrIgpRouteTag) deserialize(b []byte) error {
 	return nil
 }
 
-// TODO: serialize
 func (p *PrefixAttrIgpRouteTag) serialize() ([]byte, error) {
-	return nil, nil
+	b := make([]byte, 4)
+	binary.BigEndian.PutUint16(b[:2], uint16(p.Code()))
+	binary.BigEndian.PutUint16(b[2:], uint16(len(p.Tags)*4))
+	for _, t := range p.Tags {
+		tag := make([]byte, 4)
+		binary.BigEndian.PutUint32(tag, t)
+		b = append(b, tag...)
+	}
+
+	return b, nil
 }
 
 // PrefixAttrIgpExtendedRouteTag is a prefix attribute contained in a bgp-ls attribute.
@@ -1743,9 +1756,17 @@ func (p *PrefixAttrIgpExtendedRouteTag) deserialize(b []byte) error {
 	return nil
 }
 
-// TODO: serialize
 func (p *PrefixAttrIgpExtendedRouteTag) serialize() ([]byte, error) {
-	return nil, nil
+	b := make([]byte, 4)
+	binary.BigEndian.PutUint16(b[:2], uint16(p.Code()))
+	binary.BigEndian.PutUint16(b[2:], uint16(len(p.Tags)*8))
+	for _, t := range p.Tags {
+		tag := make([]byte, 8)
+		binary.BigEndian.PutUint64(tag, t)
+		b = append(b, tag...)
+	}
+
+	return b, nil
 }
 
 // PrefixAttrPrefixMetric is a prefix attributed contained in a bgp-ls attribute.
@@ -1773,9 +1794,12 @@ func (p *PrefixAttrPrefixMetric) deserialize(b []byte) error {
 	return nil
 }
 
-// TODO: serialize
 func (p *PrefixAttrPrefixMetric) serialize() ([]byte, error) {
-	return nil, nil
+	b := make([]byte, 8)
+	binary.BigEndian.PutUint16(b[:2], uint16(p.Code()))
+	binary.BigEndian.PutUint16(b[2:], uint16(4))
+	binary.BigEndian.PutUint32(b[4:], p.Metric)
+	return b, nil
 }
 
 // PrefixAttrOspfForwardingAddress is a prefix attribute contained in a bgp-ls attribute.
@@ -1807,9 +1831,14 @@ func (p *PrefixAttrOspfForwardingAddress) deserialize(b []byte) error {
 	return nil
 }
 
-// TODO: serialize
 func (p *PrefixAttrOspfForwardingAddress) serialize() ([]byte, error) {
-	return nil, nil
+	if p.Address.To4() == nil {
+		if p.Address.To16() == nil {
+			return nil, errors.New("invalid ip address in ospf forwarding address prefix attribute")
+		}
+		return serializeBgpLsIPv6TLV(uint16(p.Code()), p.Address)
+	}
+	return serializeBgpLsIPv4TLV(uint16(p.Code()), p.Address)
 }
 
 // PrefixAttrOpaquePrefixAttribute is a prefix attribute contained in a bgp-ls attribute.
@@ -1827,9 +1856,12 @@ func (p *PrefixAttrOpaquePrefixAttribute) deserialize(b []byte) error {
 	return nil
 }
 
-// TODO: serialize
 func (p *PrefixAttrOpaquePrefixAttribute) serialize() ([]byte, error) {
-	return nil, nil
+	b := make([]byte, 4)
+	binary.BigEndian.PutUint16(b[:2], uint16(p.Code()))
+	binary.BigEndian.PutUint16(b[2:], uint16(len(p.Data)))
+	b = append(b, p.Data...)
+	return b, nil
 }
 
 // PathAttrMpReach is a path attribute.
@@ -2072,7 +2104,7 @@ func (n *NLRIUnknown) SAFI() MultiprotoSAFI {
 	return n.s
 }
 
-// TODO: serialize NLRIUnknown
+// noop
 func (n *NLRIUnknown) serialize() ([]byte, error) {
 	return nil, nil
 }
@@ -2916,6 +2948,18 @@ func (l *LinkDescriptorIPv6NeighborAddress) deserialize(b []byte) error {
 
 	l.Address = address
 	return nil
+}
+
+func serializeMultiTopologyIDs(t uint16, ids []uint16) ([]byte, error) {
+	b := make([]byte, 4)
+	binary.BigEndian.PutUint16(b[:2], t)
+	binary.BigEndian.PutUint16(b[2:], uint16(len(ids)*2))
+	for _, id := range ids {
+		c := make([]byte, 2)
+		binary.BigEndian.PutUint16(c, id)
+		b = append(b, c...)
+	}
+	return b, nil
 }
 
 /*

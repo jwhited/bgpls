@@ -54,6 +54,9 @@ func TestUpdateMessage(t *testing.T) {
 				&NodeAttrLocalIPv6RouterID{
 					Address: net.ParseIP("2601::1"),
 				},
+				&NodeAttrMultiTopologyID{
+					IDs: []uint16{1, 2, 3, 4},
+				},
 			},
 			LinkAttrs: []LinkAttr{
 				&LinkAttrRemoteIPv4RouterID{
@@ -92,6 +95,38 @@ func TestUpdateMessage(t *testing.T) {
 				&LinkAttrIgpMetric{
 					Type:   LinkAttrIgpMetricIsIsSmallType,
 					Metric: 42,
+				},
+				&LinkAttrSharedRiskLinkGroup{
+					Groups: []uint32{24, 15, 16},
+				},
+				&LinkAttrOpaqueLinkAttr{
+					Data: []byte{1, 2, 3, 4},
+				},
+				&LinkAttrLinkName{
+					Name: "test",
+				},
+			},
+			PrefixAttrs: []PrefixAttr{
+				&PrefixAttrIgpFlags{
+					IsIsDown: true,
+				},
+				&PrefixAttrIgpRouteTag{
+					Tags: []uint32{1, 2, 3, 4},
+				},
+				&PrefixAttrIgpExtendedRouteTag{
+					Tags: []uint64{1, 2, 3, 4},
+				},
+				&PrefixAttrPrefixMetric{
+					Metric: 35,
+				},
+				&PrefixAttrOspfForwardingAddress{
+					Address: net.ParseIP("172.16.1.201").To4(),
+				},
+				&PrefixAttrOspfForwardingAddress{
+					Address: net.ParseIP("2601::1"),
+				},
+				&PrefixAttrOpaquePrefixAttribute{
+					Data: []byte{1, 2, 3, 4},
 				},
 			},
 		},
