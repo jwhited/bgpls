@@ -1501,7 +1501,6 @@ func (p *PathAttrMpReach) deserialize(f PathAttrFlags, b []byte) error {
 	return nil
 }
 
-// TODO: serialize PathAttrMpReach
 func (p *PathAttrMpReach) serialize() ([]byte, error) {
 	p.f = PathAttrFlags{
 		Optional: true,
@@ -1528,7 +1527,11 @@ func (p *PathAttrMpReach) serialize() ([]byte, error) {
 		return nil, err
 	}
 	if len(flags) != 1 {
-		return nil, errors.New("invalid path attr flags length")
+		return nil, &errWithNotification{
+			error:   errors.New("invalid path attr flags length"),
+			code:    NotifErrCodeUpdateMessage,
+			subcode: NotifErrSubcodeMalformedAttr,
+		}
 	}
 
 	b := make([]byte, 2)
@@ -1631,7 +1634,11 @@ func (p *PathAttrMpUnreach) serialize() ([]byte, error) {
 		return nil, err
 	}
 	if len(flags) != 1 {
-		return nil, errors.New("invalid path attr flags length")
+		return nil, &errWithNotification{
+			error:   errors.New("invalid path attr flags length"),
+			code:    NotifErrCodeUpdateMessage,
+			subcode: NotifErrSubcodeMalformedAttr,
+		}
 	}
 
 	b := make([]byte, 2)
@@ -2988,7 +2995,11 @@ func (o *PathAttrOrigin) serialize() ([]byte, error) {
 	}
 
 	if len(flags) != 1 {
-		return nil, errors.New("invalid path attr flags length")
+		return nil, &errWithNotification{
+			error:   errors.New("invalid path attr flags length"),
+			code:    NotifErrCodeUpdateMessage,
+			subcode: NotifErrSubcodeMalformedAttr,
+		}
 	}
 
 	return []byte{flags[0], byte(PathAttrOriginType), byte(1), byte(o.Origin)}, nil
@@ -3042,26 +3053,107 @@ func (o OriginCode) String() string {
 	}
 }
 
-// AsPathSegment is contained in an as path attribute.
-type AsPathSegment struct {
-	IsSequence bool
-	Set        []uint16
+// AsPathSegment is contained in an as-path path attribute
+type AsPathSegment interface {
+	Type() AsPathSegmentType
+	serialize() ([]byte, error)
+	deserialize(b []byte) error
 }
 
-func (a *AsPathSegment) serialize() ([]byte, error) {
-	b := make([]byte, 2+(len(a.Set)*2))
-	if a.IsSequence {
-		b[0] = uint8(2)
-	} else {
-		b[0] = uint8(1)
-	}
-	b[1] = uint8(len(a.Set))
+// AsPathSegmentType describes the type of AsPathSegment
+type AsPathSegmentType uint8
 
-	for i, s := range a.Set {
-		binary.BigEndian.PutUint16(b[i*2+2:i*2+4], s)
+// AsPathSegmentType values
+const (
+	AsPathSegmentSetType      AsPathSegmentType = 1
+	AsPathSegmentSequenceType AsPathSegmentType = 2
+)
+
+// AsPathSegmentSet is an unordered as-path segment
+type AsPathSegmentSet struct {
+	Set []uint16
+}
+
+// Type returns the appropriate AsPathSegmentType for AsPathSegmentSet
+func (a *AsPathSegmentSet) Type() AsPathSegmentType {
+	return AsPathSegmentSetType
+}
+
+func (a *AsPathSegmentSet) serialize() ([]byte, error) {
+	b := make([]byte, 2)
+	b[0] = byte(AsPathSegmentSetType)
+	b[1] = byte(len(a.Set))
+
+	for _, s := range a.Set {
+		asn := make([]byte, 2)
+		binary.BigEndian.PutUint16(asn, s)
+		b = append(b, asn...)
 	}
 
 	return b, nil
+}
+
+func (a *AsPathSegmentSet) deserialize(b []byte) error {
+	asns, err := deserializeAsPathSegment(b)
+	if err != nil {
+		return err
+	}
+
+	a.Set = asns
+	return nil
+}
+
+// AsPathSegmentSequence is an ordered as-path segment
+type AsPathSegmentSequence struct {
+	Sequence []uint16
+}
+
+// Type returns the appropriate AsPathSegmentType for AsPathSegmentSequence
+func (a *AsPathSegmentSequence) Type() AsPathSegmentType {
+	return AsPathSegmentSequenceType
+}
+
+func (a *AsPathSegmentSequence) serialize() ([]byte, error) {
+	b := make([]byte, 2)
+	b[0] = byte(AsPathSegmentSequenceType)
+	b[1] = byte(len(a.Sequence))
+
+	for _, s := range a.Sequence {
+		asn := make([]byte, 2)
+		binary.BigEndian.PutUint16(asn, s)
+		b = append(b, asn...)
+	}
+
+	return b, nil
+}
+
+func (a *AsPathSegmentSequence) deserialize(b []byte) error {
+	asns, err := deserializeAsPathSegment(b)
+	if err != nil {
+		return err
+	}
+
+	a.Sequence = asns
+	return nil
+}
+
+func deserializeAsPathSegment(b []byte) ([]uint16, error) {
+	errTooShort := &errWithNotification{
+		error:   errors.New("invalid length for as path segment"),
+		code:    NotifErrCodeUpdateMessage,
+		subcode: NotifErrSubcodeMalformedAttr,
+	}
+
+	if len(b) < 2 || len(b)%2 != 0 {
+		return nil, errTooShort
+	}
+
+	asn := make([]uint16, 0, len(b)/2)
+	for i := 0; i < len(b); i = i + 2 {
+		asn = append(asn, binary.BigEndian.Uint16(b[i:i+2]))
+	}
+
+	return asn, nil
 }
 
 // PathAttrAsPath is a path attribute.
@@ -3104,7 +3196,11 @@ func (a *PathAttrAsPath) serialize() ([]byte, error) {
 		return nil, err
 	}
 	if len(flags) != 1 {
-		return nil, errors.New("invalid path attr flags length")
+		return nil, &errWithNotification{
+			error:   errors.New("invalid path attr flags length"),
+			code:    NotifErrCodeUpdateMessage,
+			subcode: NotifErrSubcodeMalformedAttr,
+		}
 	}
 
 	b := make([]byte, 2)
@@ -3140,27 +3236,37 @@ func (a *PathAttrAsPath) deserialize(f PathAttrFlags, b []byte) error {
 			}
 		}
 
-		segment := AsPathSegment{}
-		if b[0] == 1 {
-			segment.IsSequence = true
-		}
-
-		numASes := int(b[1])
+		segmentType := b[0]
+		segmentLen := int(b[1]) * 2
 		b = b[2:]
-		if len(b) < numASes*2 {
+		if len(b) < segmentLen {
 			return &errWithNotification{
 				error:   errors.New("invalid as path length"),
 				code:    NotifErrCodeUpdateMessage,
 				subcode: NotifErrSubcodeMalformedAttr,
 			}
 		}
+		segmentToDecode := b[:segmentLen]
 
-		for i := 0; i < numASes*2; i = i + 2 {
-			segment.Set = append(segment.Set, binary.BigEndian.Uint16(b[i:i+2]))
+		switch segmentType {
+		case uint8(AsPathSegmentSequenceType):
+			segment := &AsPathSegmentSequence{}
+			err := segment.deserialize(segmentToDecode)
+			if err != nil {
+				return err
+			}
+			a.Segments = append(a.Segments, segment)
+		case uint8(AsPathSegmentSetType):
+			segment := &AsPathSegmentSet{}
+			err := segment.deserialize(segmentToDecode)
+			if err != nil {
+				return err
+			}
+			a.Segments = append(a.Segments, segment)
+		default:
 		}
 
-		a.Segments = append(a.Segments, segment)
-		b = b[numASes*2:]
+		b = b[segmentLen:]
 
 		if len(b) == 0 {
 			break
@@ -3199,7 +3305,11 @@ func (p *PathAttrLocalPref) serialize() ([]byte, error) {
 	}
 
 	if len(flags) != 1 {
-		return nil, errors.New("invalid path attr flags length")
+		return nil, &errWithNotification{
+			error:   errors.New("invalid path attr flags length"),
+			code:    NotifErrCodeUpdateMessage,
+			subcode: NotifErrSubcodeMalformedAttr,
+		}
 	}
 
 	b := make([]byte, 7)
