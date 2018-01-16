@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 )
 
@@ -49,9 +50,31 @@ func (u *UpdateMessage) MessageType() MessageType {
 	return UpdateMessageType
 }
 
-// noop
 func (u *UpdateMessage) serialize() ([]byte, error) {
-	return []byte{}, nil
+	buff := make([]byte, 4)
+
+	// withdrawn routes len
+	binary.BigEndian.PutUint16(buff[0:2], 0)
+
+	params := make([]byte, 0, 512)
+	for _, p := range u.PathAttrs {
+		b, err := p.serialize()
+		if err != nil {
+			return nil, err
+		}
+
+		params = append(params, b...)
+	}
+
+	// path attribute length
+	binary.BigEndian.PutUint16(buff[2:4], uint16(len(params)))
+
+	// path attributes
+	buff = append(buff, params...)
+
+	buff = prependHeader(buff, UpdateMessageType)
+
+	return buff, nil
 }
 
 func (u *UpdateMessage) deserialize(b []byte) error {
@@ -247,6 +270,36 @@ func validatePathAttrFlags(f PathAttrFlags, c pathAttrCategory) error {
 	}
 }
 
+/*
+	0                   1
+	0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5
+	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+	|  Attr. Flags  |Attr. Type Code|
+	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+	The high-order bit (bit 0) of the Attribute Flags octet is the
+	Optional bit.  It defines whether the attribute is optional (if
+	set to 1) or well-known (if set to 0).
+
+	The second high-order bit (bit 1) of the Attribute Flags octet
+	is the Transitive bit.  It defines whether an optional
+	attribute is transitive (if set to 1) or non-transitive (if set
+	to 0).
+
+	For well-known attributes, the Transitive bit MUST be set to 1.
+	(See Section 5 for a discussion of transitive attributes.)
+
+	The third high-order bit (bit 2) of the Attribute Flags octet
+	is the Partial bit.  It defines whether the information
+	contained in the optional transitive attribute is partial (if
+	set to 1) or complete (if set to 0).  For well-known attributes
+	and for optional non-transitive attributes, the Partial bit
+	MUST be set to 0.
+
+	The fourth high-order bit (bit 3) of the Attribute Flags octet
+	is the Extended Length bit.  It defines whether the Attribute
+	Length is one octet (if set to 0) or two octets (if set to 1).
+*/
 func pathAttrFlagsFromByte(b uint8) (PathAttrFlags, error) {
 	flags := PathAttrFlags{}
 	flags.Optional = (128 & b) != 0
@@ -265,8 +318,26 @@ type PathAttrFlags struct {
 	ExtendedLength bool
 }
 
+func (f *PathAttrFlags) serialize() (byte, error) {
+	var val uint8
+	if f.Optional {
+		val += 128
+	}
+	if f.Transitive {
+		val += 64
+	}
+	if f.Partial {
+		val += 32
+	}
+	if f.ExtendedLength {
+		val += 16
+	}
+	return val, nil
+}
+
 // PathAttr is a bgp path attribute.
 type PathAttr interface {
+	serialize() ([]byte, error)
 	Flags() PathAttrFlags
 	Type() PathAttrType
 }
@@ -532,6 +603,128 @@ func (p *PathAttrLinkState) deserialize(f PathAttrFlags, b []byte) error {
 	return nil
 }
 
+func (p *PathAttrLinkState) serialize() ([]byte, error) {
+	p.f = PathAttrFlags{
+		Optional: true,
+	}
+
+	// node attrs
+	nodeAttrs := make([]byte, 0, 512)
+	for _, n := range p.NodeAttrs {
+		b, err := n.serialize()
+		if err != nil {
+			return nil, err
+		}
+		nodeAttrs = append(nodeAttrs, b...)
+	}
+
+	// link attrs
+	linkAttrs := make([]byte, 0, 512)
+	for _, l := range p.LinkAttrs {
+		b, err := l.serialize()
+		if err != nil {
+			return nil, err
+		}
+		linkAttrs = append(linkAttrs, b...)
+	}
+
+	// prefix attrs
+	prefixAttrs := make([]byte, 0, 512)
+	for _, p := range p.PrefixAttrs {
+		b, err := p.serialize()
+		if err != nil {
+			return nil, err
+		}
+		prefixAttrs = append(prefixAttrs, b...)
+	}
+
+	nodeAttrs = append(nodeAttrs, linkAttrs...)
+	nodeAttrs = append(nodeAttrs, prefixAttrs...)
+	if len(nodeAttrs) > math.MaxUint8 {
+		p.f.ExtendedLength = true
+	}
+	flags, err := p.f.serialize()
+	if err != nil {
+		return nil, err
+	}
+
+	b := make([]byte, 2)
+	b[0] = flags
+	b[1] = byte(PathAttrLinkStateType)
+	if p.f.ExtendedLength {
+		l := make([]byte, 2)
+		binary.BigEndian.PutUint16(l, uint16(len(nodeAttrs)))
+		b = append(b, l...)
+	} else {
+		b = append(b, uint8(len(nodeAttrs)))
+	}
+	b = append(b, nodeAttrs...)
+
+	return b, nil
+}
+
+// 2 octet type and 2 octet length
+func serializeBgpLsStringTLV(l uint16, s string) []byte {
+	val := reverseByteOrder([]byte(s))
+	b := make([]byte, 4)
+	binary.BigEndian.PutUint16(b[:2], l)
+	binary.BigEndian.PutUint16(b[2:], uint16(len(val)))
+	b = append(b, val...)
+	return b
+}
+
+// 2 octet type and 2 octet length
+func serializeBgpLsIPv4TLV(l uint16, a net.IP) ([]byte, error) {
+	b := make([]byte, 4)
+	binary.BigEndian.PutUint16(b[:2], l)
+	binary.BigEndian.PutUint16(b[2:], uint16(4))
+	addr := a.To4()
+	if addr == nil {
+		return nil, errors.New("invalid ipv4 address")
+	}
+	b = append(b, addr...)
+	return b, nil
+}
+
+// 2 octet type and 2 octet length
+func serializeBgpLsIPv6TLV(l uint16, a net.IP) ([]byte, error) {
+	b := make([]byte, 4)
+	binary.BigEndian.PutUint16(b[:2], l)
+	binary.BigEndian.PutUint16(b[2:], uint16(16))
+	addr := a.To16()
+	if addr == nil {
+		return nil, errors.New("invalid ipv4 address")
+	}
+	b = append(b, addr...)
+	return b, nil
+}
+
+func deserializeIPv4Addr(b []byte) (net.IP, error) {
+	if len(b) != 4 {
+		return nil, errors.New("invalid length for ipv4 address")
+	}
+
+	addr, err := bytesToIPAddress(b)
+	if err != nil {
+		return nil, fmt.Errorf("error deserializing ipv4 address: %v", err)
+	}
+
+	return addr, err
+}
+
+func deserializeIPv6Addr(b []byte) (net.IP, error) {
+	if len(b) != 16 {
+		return nil, errors.New("invalid length for ipv6 address")
+	}
+
+	addr, err := bytesToIPAddress(b)
+	if err != nil {
+		return nil, fmt.Errorf("error deserializing ipv6 address: %v", err)
+	}
+
+	return addr, err
+}
+
 // NodeAttrCode describes the type of node attribute contained in a bgp-ls attribute
 //
 // https://tools.ietf.org/html/rfc7752#section-3.3.1
@@ -551,6 +744,7 @@ const (
 // NodeAttr is a node attribute contained in a bgp-ls attribute.
 type NodeAttr interface {
 	Code() NodeAttrCode
+	serialize() ([]byte, error)
 }
 
 // NodeAttrMultiTopologyID is a node attribute contained in a bgp-ls attribute.
@@ -573,6 +767,10 @@ func (n *NodeAttrMultiTopologyID) deserialize(b []byte) error {
 
 	n.IDs = ids
 	return nil
+}
+
+func (n *NodeAttrMultiTopologyID) serialize() ([]byte, error) {
+	return serializeMultiTopologyIDs(uint16(n.Code()), n.IDs)
 }
 
 // NodeAttrNodeFlagBits is a node attribute contained in a bgp-ls attribute.
@@ -611,6 +809,35 @@ func (n *NodeAttrNodeFlagBits) deserialize(b []byte) error {
 	return nil
 }
 
+func (n *NodeAttrNodeFlagBits) serialize() ([]byte, error) {
+	b := make([]byte, 5)
+	binary.BigEndian.PutUint16(b[:2], uint16(n.Code()))
+	binary.BigEndian.PutUint16(b[2:], uint16(1))
+
+	var val uint8
+	if n.Overload {
+		val += 128
+	}
+	if n.Attached {
+		val += 64
+	}
+	if n.External {
+		val += 32
+	}
+	if n.ABR {
+		val += 16
+	}
+	if n.Router {
+		val += 8
+	}
+	if n.V6 {
+		val += 4
+	}
+
+	b[4] = val
+	return b, nil
+}
+
 // NodeAttrOpaqueNodeAttr is a node attribute contained a bgp-ls attribute.
 //
 // https://tools.ietf.org/html/rfc7752#section-3.3.1.5
@@ -626,6 +853,14 @@ func (n *NodeAttrOpaqueNodeAttr) Code() NodeAttrCode {
 func (n *NodeAttrOpaqueNodeAttr) deserialize(b []byte) error {
 	n.Data = b
 	return nil
+}
+
+func (n *NodeAttrOpaqueNodeAttr) serialize() ([]byte, error) {
+	b := make([]byte, 4, len(n.Data)+4)
+	binary.BigEndian.PutUint16(b[:2], uint16(n.Code()))
+	binary.BigEndian.PutUint16(b[2:], uint16(len(n.Data)))
+	b = append(b, n.Data...)
+	return b, nil
 }
 
 // NodeAttrNodeName is a node attribute contained in a bgp-ls attribute.
@@ -649,11 +884,15 @@ func (n *NodeAttrNodeName) deserialize(b []byte) error {
 	return nil
 }
 
+func (n *NodeAttrNodeName) serialize() ([]byte, error) {
+	return serializeBgpLsStringTLV(uint16(n.Code()), n.Name), nil
+}
+
 // NodeAttrIsIsAreaID is a node attribute contained in a bgp-ls attribute.
 //
 // https://tools.ietf.org/html/rfc7752#section-3.3.1.2
 type NodeAttrIsIsAreaID struct {
-	AreaID uint16
+	AreaID uint32
 }
 
 // Code returns the appropriate NodeAttrCode for NodeAttrIsIsAreaID.
@@ -662,15 +901,24 @@ func (n *NodeAttrIsIsAreaID) Code() NodeAttrCode {
 }
 
 func (n *NodeAttrIsIsAreaID) deserialize(b []byte) error {
-	if len(b) != 2 {
+	if len(b) != 4 {
 		return &errWithNotification{
-			error:   errors.New("invalid length for is is area ID node attribute"),
+			error:   errors.New("invalid length for is-is area ID node attribute"),
 			code:    NotifErrCodeUpdateMessage,
 			subcode: NotifErrSubcodeMalformedAttr,
 		}
 	}
-	n.AreaID = binary.BigEndian.Uint16(b)
+
+	n.AreaID = binary.BigEndian.Uint32(b)
 	return nil
+}
+
+func (n *NodeAttrIsIsAreaID) serialize() ([]byte, error) {
+	b := make([]byte, 8)
+	binary.BigEndian.PutUint16(b[:2], uint16(n.Code()))
+	binary.BigEndian.PutUint16(b[2:], 4)
+	binary.BigEndian.PutUint32(b[4:], n.AreaID)
+	return b, nil
 }
 
 // NodeAttrLocalIPv4RouterID is a node attribute contained in a bgp-ls attribute.
@@ -686,25 +934,20 @@ func (n *NodeAttrLocalIPv4RouterID) Code() NodeAttrCode {
 }
 
 func (n *NodeAttrLocalIPv4RouterID) deserialize(b []byte) error {
-	if len(b) != 4 {
-		return &errWithNotification{
-			error:   errors.New("invalid length for local ipv4 router ID node attribute"),
-			code:    NotifErrCodeUpdateMessage,
-			subcode: NotifErrSubcodeMalformedAttr,
-		}
-	}
-
-	addr, err := bytesToIPAddress(b)
+	addr, err := deserializeIPv4Addr(b)
 	if err != nil {
 		return &errWithNotification{
-			error:   fmt.Errorf("error deserializing local ipv4 router id node attribute: %v", err),
+			error:   fmt.Errorf("invalid ipv4 router ID node attribute: %v", err),
 			code:    NotifErrCodeUpdateMessage,
 			subcode: NotifErrSubcodeMalformedAttr,
 		}
 	}
-
 	n.Address = addr
 	return nil
+}
+
+func (n *NodeAttrLocalIPv4RouterID) serialize() ([]byte, error) {
+	return serializeBgpLsIPv4TLV(uint16(n.Code()), n.Address)
 }
 
 // NodeAttrLocalIPv6RouterID is a node attribute contained in a bgp-ls attribute.
@@ -720,30 +963,26 @@ func (n *NodeAttrLocalIPv6RouterID) Code() NodeAttrCode {
 }
 
 func (n *NodeAttrLocalIPv6RouterID) deserialize(b []byte) error {
-	if len(b) != 16 {
-		return &errWithNotification{
-			error:   errors.New("invalid length for local ipv6 router ID node attribute"),
-			code:    NotifErrCodeUpdateMessage,
-			subcode: NotifErrSubcodeMalformedAttr,
-		}
-	}
-
-	addr, err := bytesToIPAddress(b)
+	addr, err := deserializeIPv6Addr(b)
 	if err != nil {
 		return &errWithNotification{
-			error:   fmt.Errorf("error deserializing local ipv6 router ID node attribute: %v", err),
+			error:   fmt.Errorf("invalid ipv6 router ID node attribute: %v", err),
 			code:    NotifErrCodeUpdateMessage,
 			subcode: NotifErrSubcodeMalformedAttr,
 		}
 	}
-
 	n.Address = addr
 	return nil
+}
+
+func (n *NodeAttrLocalIPv6RouterID) serialize() ([]byte, error) {
+	return serializeBgpLsIPv6TLV(uint16(n.Code()), n.Address)
 }
 
 // LinkAttr is a link attribute contained in a bgp-ls attribute.
 type LinkAttr interface {
 	Code() LinkAttrCode
+	serialize() ([]byte, error)
 }
 
 // LinkAttrCode describes the type of node attribute contained in a bgp-ls attribute.
@@ -781,25 +1020,20 @@ func (l *LinkAttrRemoteIPv4RouterID) Code() LinkAttrCode {
 }
 
 func (l *LinkAttrRemoteIPv4RouterID) deserialize(b []byte) error {
-	if len(b) != 4 {
-		return &errWithNotification{
-			error:   errors.New("invalid length for remote ipv4 router ID link attribute"),
-			code:    NotifErrCodeUpdateMessage,
-			subcode: NotifErrSubcodeMalformedAttr,
-		}
-	}
-
-	addr, err := bytesToIPAddress(b)
+	addr, err := deserializeIPv4Addr(b)
 	if err != nil {
 		return &errWithNotification{
-			error:   fmt.Errorf("error deserializing remote ipv4 router id link attribute: %v", err),
+			error:   fmt.Errorf("invalid ipv4 router ID link attribute: %v", err),
 			code:    NotifErrCodeUpdateMessage,
 			subcode: NotifErrSubcodeMalformedAttr,
 		}
 	}
-
 	l.Address = addr
 	return nil
+}
+
+func (l *LinkAttrRemoteIPv4RouterID) serialize() ([]byte, error) {
+	return serializeBgpLsIPv4TLV(uint16(l.Code()), l.Address)
 }
 
 // LinkAttrRemoteIPv6RouterID is a link attribute contained in a bgp-ls attribute.
@@ -815,25 +1049,20 @@ func (l *LinkAttrRemoteIPv6RouterID) Code() LinkAttrCode {
 }
 
 func (l *LinkAttrRemoteIPv6RouterID) deserialize(b []byte) error {
-	if len(b) != 16 {
-		return &errWithNotification{
-			error:   errors.New("invalid length for remote ipv6 router ID link attribute"),
-			code:    NotifErrCodeUpdateMessage,
-			subcode: NotifErrSubcodeMalformedAttr,
-		}
-	}
-
-	addr, err := bytesToIPAddress(b)
+	addr, err := deserializeIPv6Addr(b)
 	if err != nil {
 		return &errWithNotification{
-			error:   fmt.Errorf("error deserializing remote ipv6 router id link attribute: %v", err),
+			error:   fmt.Errorf("invalid ipv6 remote router ID link attribute: %v", err),
 			code:    NotifErrCodeUpdateMessage,
 			subcode: NotifErrSubcodeMalformedAttr,
 		}
 	}
-
 	l.Address = addr
 	return nil
+}
+
+func (l *LinkAttrRemoteIPv6RouterID) serialize() ([]byte, error) {
+	return serializeBgpLsIPv6TLV(uint16(l.Code()), l.Address)
 }
 
 // LinkAttrAdminGroup is a link attribute contained in a bgp-ls attribute.
@@ -875,6 +1104,23 @@ func (l *LinkAttrAdminGroup) deserialize(b []byte) error {
 	return nil
 }
 
+func (l *LinkAttrAdminGroup) serialize() ([]byte, error) {
+	b := make([]byte, 4)
+	binary.BigEndian.PutUint16(b[:2], uint16(l.Code()))
+	binary.BigEndian.PutUint16(b[2:], 4)
+	c := make([]byte, 4)
+	for i := 0; i < 4; i++ {
+		for j, k := 1, 0; j < 256; j, k = j*2, k+1 {
+			if l.Group[i*8+k] {
+				c[i] += uint8(j)
+			}
+		}
+	}
+	c = reverseByteOrder(c)
+	b = append(b, c...)
+	return b, nil
+}
+
 // LinkAttrMaxLinkBandwidth is a link attribute contained in a bgp-ls attribute.
 //
 // https://tools.ietf.org/html/rfc5305#section-3.4
@@ -910,6 +1156,20 @@ func (l *LinkAttrMaxLinkBandwidth) deserialize(b []byte) error {
 	return nil
 }
 
+func (l *LinkAttrMaxLinkBandwidth) serialize() ([]byte, error) {
+	b := make([]byte, 4)
+	binary.BigEndian.PutUint16(b[:2], uint16(l.Code()))
+	binary.BigEndian.PutUint16(b[2:], 4)
+	f := new(bytes.Buffer)
+	err := binary.Write(f, binary.BigEndian, l.BytesPerSecond)
+	if err != nil {
+		return nil, err
+	}
+
+	b = append(b, f.Bytes()...)
+	return b, nil
+}
+
 // LinkAttrMaxReservableLinkBandwidth is a link attribute contained in a bgp-ls attribute.
 //
 // https://tools.ietf.org/html/rfc5305#section-3.5
@@ -943,6 +1203,20 @@ func (l *LinkAttrMaxReservableLinkBandwidth) deserialize(b []byte) error {
 	}
 	l.BytesPerSecond = f
 	return nil
+}
+
+func (l *LinkAttrMaxReservableLinkBandwidth) serialize() ([]byte, error) {
+	b := make([]byte, 4)
+	binary.BigEndian.PutUint16(b[:2], uint16(l.Code()))
+	binary.BigEndian.PutUint16(b[2:], 4)
+	f := new(bytes.Buffer)
+	err := binary.Write(f, binary.BigEndian, l.BytesPerSecond)
+	if err != nil {
+		return nil, err
+	}
+
+	b = append(b, f.Bytes()...)
+	return b, nil
 }
 
 // LinkAttrUnreservedBandwidth is a link attribute contained in a bgp-ls attribute.
@@ -984,6 +1258,22 @@ func (l *LinkAttrUnreservedBandwidth) deserialize(b []byte) error {
 	return nil
 }
 
+func (l *LinkAttrUnreservedBandwidth) serialize() ([]byte, error) {
+	b := make([]byte, 4, 36)
+	binary.BigEndian.PutUint16(b[:2], uint16(l.Code()))
+	binary.BigEndian.PutUint16(b[2:], uint16(32))
+
+	for i := 0; i < 8; i++ {
+		f := new(bytes.Buffer)
+		err := binary.Write(f, binary.BigEndian, l.BytesPerSecond[i])
+		if err != nil {
+			return nil, err
+		}
+		b = append(b, f.Bytes()...)
+	}
+	return b, nil
+}
+
 // LinkAttrTEDefaultMetric is a link attribute contained in a bgp-ls attribute.
 //
 // https://tools.ietf.org/html/rfc5305#section-3.7
@@ -1007,6 +1297,14 @@ func (l *LinkAttrTEDefaultMetric) deserialize(b []byte) error {
 
 	l.Metric = binary.BigEndian.Uint32(b)
 	return nil
+}
+
+func (l *LinkAttrTEDefaultMetric) serialize() ([]byte, error) {
+	b := make([]byte, 8)
+	binary.BigEndian.PutUint16(b[:2], uint16(l.Code()))
+	binary.BigEndian.PutUint16(b[2:], uint16(4))
+	binary.BigEndian.PutUint32(b[4:], l.Metric)
+	return b, nil
 }
 
 // LinkAttrLinkProtectionType is a link attribute contained in a bgp-ls attribute.
@@ -1045,6 +1343,33 @@ func (l *LinkAttrLinkProtectionType) deserialize(b []byte) error {
 	return nil
 }
 
+func (l *LinkAttrLinkProtectionType) serialize() ([]byte, error) {
+	b := make([]byte, 6)
+	binary.BigEndian.PutUint16(b[:2], uint16(l.Code()))
+	binary.BigEndian.PutUint16(b[2:], uint16(2))
+
+	if l.ExtraTraffic {
+		b[4]++
+	}
+	if l.Unprotected {
+		b[4] += 2
+	}
+	if l.Shared {
+		b[4] += 4
+	}
+	if l.DedicatedOneToOne {
+		b[4] += 8
+	}
+	if l.DedicatedOnePlusOne {
+		b[4] += 16
+	}
+	if l.Enhanced {
+		b[4] += 32
+	}
+
+	return b, nil
+}
+
 // LinkAttrMplsProtocolMask is a link attribute contained in a bgp-ls attribute.
 //
 // https://tools.ietf.org/html/rfc7752#section-3.3.2.2
@@ -1072,11 +1397,50 @@ func (l *LinkAttrMplsProtocolMask) deserialize(b []byte) error {
 	return nil
 }
 
+func (l *LinkAttrMplsProtocolMask) serialize() ([]byte, error) {
+	b := make([]byte, 5)
+	binary.BigEndian.PutUint16(b[:2], uint16(l.Code()))
+	binary.BigEndian.PutUint16(b[2:], uint16(1))
+	if l.LDP {
+		b[4] += 128
+	}
+	if l.RsvpTE {
+		b[4] += 64
+	}
+	return b, nil
+}
+
 // LinkAttrIgpMetric is a link attribute contained in a bgp-ls attribute.
 //
 // https://tools.ietf.org/html/rfc7752#section-3.3.2.4
 type LinkAttrIgpMetric struct {
 	Metric uint32
+	Type   LinkAttrIgpMetricType
+}
+
+// LinkAttrIgpMetricType describes the type of igp metric contained in a LinkAttrIgpMetric
+//
+// https://tools.ietf.org/html/rfc7752#section-3.3.2.4
+type LinkAttrIgpMetricType uint8
+
+// LinkAttrIgpMetricType values
+const (
+	LinkAttrIgpMetricIsIsSmallType LinkAttrIgpMetricType = iota
+	LinkAttrIgpMetricOspfType
+	LinkAttrIgpMetricIsIsWideType
+)
+
+func (l LinkAttrIgpMetricType) String() string {
+	switch l {
+	case LinkAttrIgpMetricIsIsSmallType:
+		return "is-is small"
+	case LinkAttrIgpMetricOspfType:
+		return "ospf"
+	case LinkAttrIgpMetricIsIsWideType:
+		return "is-is wide"
+	default:
+		return "unknown igp metric type"
+	}
 }
 
 // Code returns the appropriate LinkAttrCode for LinkAttrIgpMetric.
@@ -1084,13 +1448,31 @@ func (l *LinkAttrIgpMetric) Code() LinkAttrCode {
 	return LinkAttrCodeIgpMetric
 }
 
+/*
+	The IGP Metric TLV carries the metric for this link.  The length of
+	this TLV is variable, depending on the metric width of the underlying
+	protocol.  IS-IS small metrics have a length of 1 octet (the two most
+	significant bits are ignored).  OSPF link metrics have a length of 2
+	octets.  IS-IS wide metrics have a length of 3 octets.
+
+	 0                   1                   2                   3
+	 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+	|              Type             |             Length            |
+	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+	//      IGP Link Metric (variable length)      //
+	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+*/
 func (l *LinkAttrIgpMetric) deserialize(b []byte) error {
 	switch len(b) {
 	case 1:
+		l.Type = LinkAttrIgpMetricIsIsSmallType
 		b = append([]byte{0, 0, 0}, b...)
 	case 2:
+		l.Type = LinkAttrIgpMetricOspfType
 		b = append([]byte{0, 0}, b...)
 	case 3:
+		l.Type = LinkAttrIgpMetricIsIsWideType
 		b = append([]byte{0}, b...)
 	default:
 		return &errWithNotification{
@@ -1102,6 +1484,27 @@ func (l *LinkAttrIgpMetric) deserialize(b []byte) error {
 
 	l.Metric = binary.BigEndian.Uint32(b)
 	return nil
+}
+
+func (l *LinkAttrIgpMetric) serialize() ([]byte, error) {
+	b := make([]byte, 4)
+	binary.BigEndian.PutUint16(b[:2], uint16(l.Code()))
+
+	c := make([]byte, 4)
+	binary.BigEndian.PutUint32(c, l.Metric)
+	switch l.Type {
+	case LinkAttrIgpMetricIsIsSmallType:
+		c = c[3:]
+	case LinkAttrIgpMetricOspfType:
+		c = c[2:]
+	case LinkAttrIgpMetricIsIsWideType:
+		c = c[1:]
+	}
+
+	binary.BigEndian.PutUint16(b[2:], uint16(len(c)))
+	b = append(b, c...)
+
+	return b, nil
 }
 
 // LinkAttrSharedRiskLinkGroup is a link attribute contained in a bgp-ls attribute.
@@ -1136,6 +1539,18 @@ func (l *LinkAttrSharedRiskLinkGroup) deserialize(b []byte) error {
 	return nil
 }
 
+func (l *LinkAttrSharedRiskLinkGroup) serialize() ([]byte, error) {
+	b := make([]byte, 4)
+	binary.BigEndian.PutUint16(b[:2], uint16(l.Code()))
+	binary.BigEndian.PutUint16(b[2:], uint16(len(l.Groups)*4))
+	for _, g := range l.Groups {
+		c := make([]byte, 4)
+		binary.BigEndian.PutUint32(c, g)
+		b = append(b, c...)
+	}
+	return b, nil
+}
+
 // LinkAttrOpaqueLinkAttr is a link attribute contained in a bgp-ls attribute.
 //
 // https://tools.ietf.org/html/rfc7752#section-3.3.2.6
@@ -1151,6 +1566,14 @@ func (l *LinkAttrOpaqueLinkAttr) Code() LinkAttrCode {
 func (l *LinkAttrOpaqueLinkAttr) deserialize(b []byte) error {
 	l.Data = b
 	return nil
+}
+
+func (l *LinkAttrOpaqueLinkAttr) serialize() ([]byte, error) {
+	b := make([]byte, 4)
+	binary.BigEndian.PutUint16(b[:2], uint16(l.Code()))
+	binary.BigEndian.PutUint16(b[2:], uint16(len(l.Data)))
+	b = append(b, l.Data...)
+	return b, nil
 }
 
 // LinkAttrLinkName is a link attribute contained in a bgp-ls attribute.
@@ -1171,9 +1594,14 @@ func (l *LinkAttrLinkName) deserialize(b []byte) error {
 	return nil
 }
 
+func (l *LinkAttrLinkName) serialize() ([]byte, error) {
+	return serializeBgpLsStringTLV(uint16(l.Code()), l.Name), nil
+}
+
 // PrefixAttr is a prefix attribute contained in a bgp-ls attribute.
 type PrefixAttr interface {
 	Code() PrefixAttrCode
+	serialize() ([]byte, error)
 }
 
 // PrefixAttrCode describes the type of prefix attribute contained in a bgp-ls attribute.
@@ -1234,6 +1662,25 @@ func (p *PrefixAttrIgpFlags) deserialize(b []byte) error {
 	return nil
 }
 
+func (p *PrefixAttrIgpFlags) serialize() ([]byte, error) {
+	b := make([]byte, 5)
+	binary.BigEndian.PutUint16(b[:2], uint16(p.Code()))
+	binary.BigEndian.PutUint16(b[2:], uint16(1))
+	if p.IsIsDown {
+		b[4] += 128
+	}
+	if p.OspfNoUnicast {
+		b[4] += 64
+	}
+	if p.OspfLocalAddress {
+		b[4] += 32
+	}
+	if p.OspfPropagateNssa {
+		b[4] += 16
+	}
+	return b, nil
+}
+
 // PrefixAttrIgpRouteTag is a prefix attribute contained in a bgp-ls attribute.
 //
 // https://tools.ietf.org/html/rfc7752#section-3.3.3.2
@@ -1263,6 +1710,19 @@ func (p *PrefixAttrIgpRouteTag) deserialize(b []byte) error {
 		}
 	}
 	return nil
+}
+
+func (p *PrefixAttrIgpRouteTag) serialize() ([]byte, error) {
+	b := make([]byte, 4)
+	binary.BigEndian.PutUint16(b[:2], uint16(p.Code()))
+	binary.BigEndian.PutUint16(b[2:], uint16(len(p.Tags)*4))
+	for _, t := range p.Tags {
+		tag := make([]byte, 4)
+		binary.BigEndian.PutUint32(tag, t)
+		b = append(b, tag...)
+	}
+
+	return b, nil
 }
 
 // PrefixAttrIgpExtendedRouteTag is a prefix attribute contained in a bgp-ls attribute.
@@ -1296,6 +1756,19 @@ func (p *PrefixAttrIgpExtendedRouteTag) deserialize(b []byte) error {
 	return nil
 }
 
+func (p *PrefixAttrIgpExtendedRouteTag) serialize() ([]byte, error) {
+	b := make([]byte, 4)
+	binary.BigEndian.PutUint16(b[:2], uint16(p.Code()))
+	binary.BigEndian.PutUint16(b[2:], uint16(len(p.Tags)*8))
+	for _, t := range p.Tags {
+		tag := make([]byte, 8)
+		binary.BigEndian.PutUint64(tag, t)
+		b = append(b, tag...)
+	}
+
+	return b, nil
+}
+
 // PrefixAttrPrefixMetric is a prefix attributed contained in a bgp-ls attribute.
 //
 // https://tools.ietf.org/html/rfc7752#section-3.3.3.4
@@ -1319,6 +1792,14 @@ func (p *PrefixAttrPrefixMetric) deserialize(b []byte) error {
 
 	p.Metric = binary.BigEndian.Uint32(b)
 	return nil
+}
+
+func (p *PrefixAttrPrefixMetric) serialize() ([]byte, error) {
+	b := make([]byte, 8)
+	binary.BigEndian.PutUint16(b[:2], uint16(p.Code()))
+	binary.BigEndian.PutUint16(b[2:], uint16(4))
+	binary.BigEndian.PutUint32(b[4:], p.Metric)
+	return b, nil
 }
 
 // PrefixAttrOspfForwardingAddress is a prefix attribute contained in a bgp-ls attribute.
@@ -1350,6 +1831,16 @@ func (p *PrefixAttrOspfForwardingAddress) deserialize(b []byte) error {
 	return nil
 }
 
+func (p *PrefixAttrOspfForwardingAddress) serialize() ([]byte, error) {
+	if p.Address.To4() == nil {
+		if p.Address.To16() == nil {
+			return nil, errors.New("invalid ip address in ospf forwarding address prefix attribute")
+		}
+		return serializeBgpLsIPv6TLV(uint16(p.Code()), p.Address)
+	}
+	return serializeBgpLsIPv4TLV(uint16(p.Code()), p.Address)
+}
+
 // PrefixAttrOpaquePrefixAttribute is a prefix attribute contained in a bgp-ls attribute.
 type PrefixAttrOpaquePrefixAttribute struct {
 	Data []byte
@@ -1363,6 +1854,14 @@ func (p *PrefixAttrOpaquePrefixAttribute) Code() PrefixAttrCode {
 func (p *PrefixAttrOpaquePrefixAttribute) deserialize(b []byte) error {
 	p.Data = b
 	return nil
+}
+
+func (p *PrefixAttrOpaquePrefixAttribute) serialize() ([]byte, error) {
+	b := make([]byte, 4)
+	binary.BigEndian.PutUint16(b[:2], uint16(p.Code()))
+	binary.BigEndian.PutUint16(b[2:], uint16(len(p.Data)))
+	b = append(b, p.Data...)
+	return b, nil
 }
 
 // PathAttrMpReach is a path attribute.
@@ -1425,6 +1924,49 @@ func (p *PathAttrMpReach) deserialize(f PathAttrFlags, b []byte) error {
 	return nil
 }
 
+func (p *PathAttrMpReach) serialize() ([]byte, error) {
+	p.f = PathAttrFlags{
+		Optional: true,
+	}
+
+	nlri, err := p.NLRI.serialize()
+	if err != nil {
+		return nil, err
+	}
+
+	// prepend reserved byte, nh len, safi, afi
+	nlri = append([]byte{0}, nlri...)
+	nlri = append([]byte{0}, nlri...)
+	nlri = append([]byte{byte(p.SAFI)}, nlri...)
+	afi := make([]byte, 2)
+	binary.BigEndian.PutUint16(afi, uint16(p.AFI))
+	nlri = append(afi, nlri...)
+
+	if len(nlri) > math.MaxUint8 {
+		p.f.ExtendedLength = true
+	}
+	flags, err := p.f.serialize()
+	if err != nil {
+		return nil, err
+	}
+
+	b := make([]byte, 2)
+	b[0] = flags
+	b[1] = byte(PathAttrMpReachType)
+
+	if p.f.ExtendedLength {
+		attrLen := make([]byte, 2)
+		binary.BigEndian.PutUint16(attrLen, uint16(len(nlri)))
+		b = append(b, attrLen...)
+	} else {
+		b = append(b, []byte{uint8(len(nlri))}...)
+	}
+
+	b = append(b, nlri...)
+
+	return b, nil
+}
+
 // Flags returns the PathAttrFlags for PathAttrMpReach.
 func (p *PathAttrMpReach) Flags() PathAttrFlags {
 	return p.f
@@ -1484,6 +2026,47 @@ func (p *PathAttrMpUnreach) deserialize(f PathAttrFlags, b []byte) error {
 	return nil
 }
 
+func (p *PathAttrMpUnreach) serialize() ([]byte, error) {
+	p.f = PathAttrFlags{
+		Optional: true,
+	}
+
+	nlri, err := p.NLRI.serialize()
+	if err != nil {
+		return nil, err
+	}
+
+	// prepend safi and afi
+	nlri = append([]byte{byte(p.SAFI)}, nlri...)
+	afi := make([]byte, 2)
+	binary.BigEndian.PutUint16(afi, uint16(p.AFI))
+	nlri = append(afi, nlri...)
+
+	if len(nlri) > math.MaxUint8 {
+		p.f.ExtendedLength = true
+	}
+	flags, err := p.f.serialize()
+	if err != nil {
+		return nil, err
+	}
+
+	b := make([]byte, 2)
+	b[0] = flags
+	b[1] = byte(PathAttrMpUnreachType)
+
+	if p.f.ExtendedLength {
+		attrLen := make([]byte, 2)
+		binary.BigEndian.PutUint16(attrLen, uint16(len(nlri)))
+		b = append(b, attrLen...)
+	} else {
+		b = append(b, []byte{uint8(len(nlri))}...)
+	}
+
+	b = append(b, nlri...)
+
+	return b, nil
+}
+
 // Flags returns the PathAttrFlags for PathAttrMpUnreach.
 func (p *PathAttrMpUnreach) Flags() PathAttrFlags {
 	return p.f
@@ -1501,6 +2084,7 @@ type NLRI interface {
 	AFI() MultiprotoAFI
 	SAFI() MultiprotoSAFI
 	deserialize(b []byte) error
+	serialize() ([]byte, error)
 }
 
 // NLRIUnknown is an unknown type of nlri.
@@ -1518,6 +2102,11 @@ func (n *NLRIUnknown) AFI() MultiprotoAFI {
 // SAFI returns the subsequent address family id for NLRIUnknown.
 func (n *NLRIUnknown) SAFI() MultiprotoSAFI {
 	return n.s
+}
+
+// noop
+func (n *NLRIUnknown) serialize() ([]byte, error) {
+	return nil, nil
 }
 
 func (n *NLRIUnknown) deserialize(b []byte) error {
@@ -1542,6 +2131,11 @@ func (ls *NLRILinkState) AFI() MultiprotoAFI {
 // SAFI returns the subsequent address family id for NLRILinkState.
 func (ls *NLRILinkState) SAFI() MultiprotoSAFI {
 	return BgpLsSAFI
+}
+
+// TODO: serialize NLRILinkState
+func (ls *NLRILinkState) serialize() ([]byte, error) {
+	return nil, nil
 }
 
 func (ls *NLRILinkState) deserialize(b []byte) error {
@@ -2356,6 +2950,18 @@ func (l *LinkDescriptorIPv6NeighborAddress) deserialize(b []byte) error {
 	return nil
 }
 
+func serializeMultiTopologyIDs(t uint16, ids []uint16) ([]byte, error) {
+	b := make([]byte, 4)
+	binary.BigEndian.PutUint16(b[:2], t)
+	binary.BigEndian.PutUint16(b[2:], uint16(len(ids)*2))
+	for _, id := range ids {
+		c := make([]byte, 2)
+		binary.BigEndian.PutUint16(c, id)
+		b = append(b, c...)
+	}
+	return b, nil
+}
+
 /*
 	0                   1                   2                   3
 	0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
@@ -2799,9 +3405,17 @@ func (o *PathAttrOrigin) Type() PathAttrType {
 	return PathAttrOriginType
 }
 
-// noop
 func (o *PathAttrOrigin) serialize() ([]byte, error) {
-	return nil, nil
+	o.f = PathAttrFlags{
+		Transitive: true,
+	}
+
+	flags, err := o.f.serialize()
+	if err != nil {
+		return nil, err
+	}
+
+	return []byte{flags, byte(PathAttrOriginType), byte(1), byte(o.Origin)}, nil
 }
 
 func (o *PathAttrOrigin) deserialize(flags PathAttrFlags, b []byte) error {
@@ -2852,10 +3466,107 @@ func (o OriginCode) String() string {
 	}
 }
 
-// AsPathSegment is contained in an as path attribute.
-type AsPathSegment struct {
-	IsSequence bool
-	Set        []uint16
+// AsPathSegment is contained in an as-path path attribute
+type AsPathSegment interface {
+	Type() AsPathSegmentType
+	serialize() ([]byte, error)
+	deserialize(b []byte) error
+}
+
+// AsPathSegmentType describes the type of AsPathSegment
+type AsPathSegmentType uint8
+
+// AsPathSegmentType values
+const (
+	AsPathSegmentSetType      AsPathSegmentType = 1
+	AsPathSegmentSequenceType AsPathSegmentType = 2
+)
+
+// AsPathSegmentSet is an unordered as-path segment
+type AsPathSegmentSet struct {
+	Set []uint16
+}
+
+// Type returns the appropriate AsPathSegmentType for AsPathSegmentSet
+func (a *AsPathSegmentSet) Type() AsPathSegmentType {
+	return AsPathSegmentSetType
+}
+
+func (a *AsPathSegmentSet) serialize() ([]byte, error) {
+	b := make([]byte, 2)
+	b[0] = byte(AsPathSegmentSetType)
+	b[1] = byte(len(a.Set))
+
+	for _, s := range a.Set {
+		asn := make([]byte, 2)
+		binary.BigEndian.PutUint16(asn, s)
+		b = append(b, asn...)
+	}
+
+	return b, nil
+}
+
+func (a *AsPathSegmentSet) deserialize(b []byte) error {
+	asns, err := deserializeAsPathSegment(b)
+	if err != nil {
+		return err
+	}
+
+	a.Set = asns
+	return nil
+}
+
+// AsPathSegmentSequence is an ordered as-path segment
+type AsPathSegmentSequence struct {
+	Sequence []uint16
+}
+
+// Type returns the appropriate AsPathSegmentType for AsPathSegmentSequence
+func (a *AsPathSegmentSequence) Type() AsPathSegmentType {
+	return AsPathSegmentSequenceType
+}
+
+func (a *AsPathSegmentSequence) serialize() ([]byte, error) {
+	b := make([]byte, 2)
+	b[0] = byte(AsPathSegmentSequenceType)
+	b[1] = byte(len(a.Sequence))
+
+	for _, s := range a.Sequence {
+		asn := make([]byte, 2)
+		binary.BigEndian.PutUint16(asn, s)
+		b = append(b, asn...)
+	}
+
+	return b, nil
+}
+
+func (a *AsPathSegmentSequence) deserialize(b []byte) error {
+	asns, err := deserializeAsPathSegment(b)
+	if err != nil {
+		return err
+	}
+
+	a.Sequence = asns
+	return nil
+}
+
+func deserializeAsPathSegment(b []byte) ([]uint16, error) {
+	errTooShort := &errWithNotification{
+		error:   errors.New("invalid length for as path segment"),
+		code:    NotifErrCodeUpdateMessage,
+		subcode: NotifErrSubcodeMalformedAttr,
+	}
+
+	if len(b) < 2 || len(b)%2 != 0 {
+		return nil, errTooShort
+	}
+
+	asn := make([]uint16, 0, len(b)/2)
+	for i := 0; i < len(b); i = i + 2 {
+		asn = append(asn, binary.BigEndian.Uint16(b[i:i+2]))
+	}
+
+	return asn, nil
 }
 
 // PathAttrAsPath is a path attribute.
@@ -2876,9 +3587,43 @@ func (a *PathAttrAsPath) Type() PathAttrType {
 	return PathAttrAsPathType
 }
 
-// noop
 func (a *PathAttrAsPath) serialize() ([]byte, error) {
-	return nil, nil
+	a.f = PathAttrFlags{
+		Transitive: true,
+	}
+
+	segments := make([]byte, 0, 512)
+	for _, s := range a.Segments {
+		b, err := s.serialize()
+		if err != nil {
+			return nil, err
+		}
+		segments = append(segments, b...)
+	}
+
+	if len(segments) > math.MaxUint8 {
+		a.f.ExtendedLength = true
+	}
+	flags, err := a.f.serialize()
+	if err != nil {
+		return nil, err
+	}
+
+	b := make([]byte, 2)
+	b[0] = flags
+	b[1] = byte(PathAttrAsPathType)
+
+	if a.f.ExtendedLength {
+		attrLen := make([]byte, 2)
+		binary.BigEndian.PutUint16(attrLen, uint16(len(segments)))
+		b = append(b, attrLen...)
+	} else {
+		b = append(b, uint8(len(segments)))
+	}
+
+	b = append(b, segments...)
+
+	return b, nil
 }
 
 func (a *PathAttrAsPath) deserialize(f PathAttrFlags, b []byte) error {
@@ -2897,27 +3642,42 @@ func (a *PathAttrAsPath) deserialize(f PathAttrFlags, b []byte) error {
 			}
 		}
 
-		segment := AsPathSegment{}
-		if b[0] == 1 {
-			segment.IsSequence = true
-		}
-
-		numASes := int(b[1])
+		segmentType := b[0]
+		segmentLen := int(b[1]) * 2
 		b = b[2:]
-		if len(b) < numASes*2 {
+		if len(b) < segmentLen {
 			return &errWithNotification{
 				error:   errors.New("invalid as path length"),
 				code:    NotifErrCodeUpdateMessage,
 				subcode: NotifErrSubcodeMalformedAttr,
 			}
 		}
+		segmentToDecode := b[:segmentLen]
 
-		for i := 0; i < numASes*2; i = i + 2 {
-			segment.Set = append(segment.Set, binary.BigEndian.Uint16(b[i:i+2]))
+		switch segmentType {
+		case uint8(AsPathSegmentSequenceType):
+			segment := &AsPathSegmentSequence{}
+			err := segment.deserialize(segmentToDecode)
+			if err != nil {
+				return err
+			}
+			a.Segments = append(a.Segments, segment)
+		case uint8(AsPathSegmentSetType):
+			segment := &AsPathSegmentSet{}
+			err := segment.deserialize(segmentToDecode)
+			if err != nil {
+				return err
+			}
+			a.Segments = append(a.Segments, segment)
+		default:
+			return &errWithNotification{
+				error:   errors.New("invalid as path segment type"),
+				code:    NotifErrCodeUpdateMessage,
+				subcode: NotifErrSubcodeMalformedAttr,
+			}
 		}
 
-		a.Segments = append(a.Segments, segment)
-		b = b[numASes*2:]
+		b = b[segmentLen:]
 
 		if len(b) == 0 {
 			break
@@ -2932,7 +3692,7 @@ func (a *PathAttrAsPath) deserialize(f PathAttrFlags, b []byte) error {
 // https://tools.ietf.org/html/rfc4271#section-5.1.5
 type PathAttrLocalPref struct {
 	f          PathAttrFlags
-	Preference int
+	Preference uint32
 }
 
 // Flags returns the PathAttrFlags for PathAttrLocalPref.
@@ -2945,9 +3705,22 @@ func (p *PathAttrLocalPref) Type() PathAttrType {
 	return PathAttrLocalPrefType
 }
 
-// noop
 func (p *PathAttrLocalPref) serialize() ([]byte, error) {
-	return nil, nil
+	p.f = PathAttrFlags{
+		Transitive: true,
+	}
+
+	flags, err := p.f.serialize()
+	if err != nil {
+		return nil, err
+	}
+
+	b := make([]byte, 7)
+	b[0] = flags
+	b[1] = byte(PathAttrLocalPrefType)
+	b[2] = byte(4)
+	binary.BigEndian.PutUint32(b[3:7], p.Preference)
+	return b, nil
 }
 
 func (p *PathAttrLocalPref) deserialize(f PathAttrFlags, b []byte) error {
@@ -2960,7 +3733,7 @@ func (p *PathAttrLocalPref) deserialize(f PathAttrFlags, b []byte) error {
 		}
 	}
 
-	p.Preference = int(binary.BigEndian.Uint32(b))
+	p.Preference = binary.BigEndian.Uint32(b)
 
 	return nil
 }

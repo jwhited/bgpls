@@ -88,22 +88,18 @@ func (o *openMessage) serialize() ([]byte, error) {
 	binary.BigEndian.PutUint32(buff[5:9], o.bgpID)
 
 	// optional parameters
-	if len(o.optParams) > 0 {
-		params := make([]byte, 0, 512)
-		for _, p := range o.optParams {
-			b, err := p.serialize()
-			if err != nil {
-				return buff, err
-			}
-
-			params = append(params, b...)
+	params := make([]byte, 0, 512)
+	for _, p := range o.optParams {
+		b, err := p.serialize()
+		if err != nil {
+			return buff, err
 		}
 
-		buff = append(buff, uint8(len(params)))
-		buff = append(buff, params...)
-	} else {
-		buff = append(buff, 0)
+		params = append(params, b...)
 	}
+
+	buff = append(buff, uint8(len(params)))
+	buff = append(buff, params...)
 
 	buff = prependHeader(buff, OpenMessageType)
 
