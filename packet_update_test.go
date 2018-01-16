@@ -14,6 +14,17 @@ func TestUpdateMessage(t *testing.T) {
 	unreservedBW[0] = 10000
 
 	attrs := []PathAttr{
+		&PathAttrMpReach{
+			Nlri: []LinkStateNlri{
+				&LinkStateNlriNode{
+					LocalNodeDescriptors: []NodeDescriptor{
+						&NodeDescriptorASN{
+							ASN: uint32(64512),
+						},
+					},
+				},
+			},
+		},
 		&PathAttrOrigin{
 			Origin: OriginCodeIGP,
 		},

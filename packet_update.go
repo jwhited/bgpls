@@ -1869,9 +1869,9 @@ func (p *PrefixAttrOpaquePrefixAttribute) serialize() ([]byte, error) {
 // https://tools.ietf.org/html/rfc4760#section-3
 type PathAttrMpReach struct {
 	f    PathAttrFlags
-	AFI  MultiprotoAFI
-	SAFI MultiprotoSAFI
-	NLRI NLRI
+	Afi  MultiprotoAfi
+	Safi MultiprotoSafi
+	Nlri []LinkStateNlri
 }
 
 /*
@@ -1902,8 +1902,8 @@ func (p *PathAttrMpReach) deserialize(f PathAttrFlags, b []byte) error {
 		return tooShortErr
 	}
 
-	p.AFI = MultiprotoAFI(binary.BigEndian.Uint16(b[:2]))
-	p.SAFI = MultiprotoSAFI(b[2])
+	p.Afi = MultiprotoAfi(binary.BigEndian.Uint16(b[:2]))
+	p.Safi = MultiprotoSafi(b[2])
 	nhLen := int(b[3])
 	b = b[4:]
 	if len(b) < nhLen+1 {
@@ -1911,17 +1911,97 @@ func (p *PathAttrMpReach) deserialize(f PathAttrFlags, b []byte) error {
 	}
 	b = b[nhLen+1:]
 
-	if p.AFI == BgpLsAFI && p.SAFI == BgpLsSAFI {
-		p.NLRI = &NLRILinkState{}
-	} else {
-		p.NLRI = &NLRIUnknown{}
-	}
-	err := p.NLRI.deserialize(b)
+	nlri, err := deserializeLinkStateNlri(p.Afi, p.Safi, b)
 	if err != nil {
 		return err
 	}
+	for _, n := range nlri {
+		p.Nlri = append(p.Nlri, n)
+	}
 
 	return nil
+}
+
+func deserializeLinkStateNlri(afi MultiprotoAfi, safi MultiprotoSafi, b []byte) ([]LinkStateNlri, error) {
+	if afi == BgpLsAfi || safi == BgpLsSafi {
+		return nil, &errWithNotification{
+			error:   errors.New("non bgp-ls afi/safi"),
+			code:    NotifErrCodeUpdateMessage,
+			subcode: NotifErrSubcodeMalformedAttr,
+		}
+	}
+
+	if len(b) == 0 {
+		return nil, nil
+	}
+
+	tooShortErr := &errWithNotification{
+		error:   errors.New("link state nlri attribute too short"),
+		code:    NotifErrCodeUpdateMessage,
+		subcode: NotifErrSubcodeMalformedAttr,
+	}
+
+	if len(b) < 4 {
+		return nil, tooShortErr
+	}
+
+	nlri := make([]LinkStateNlri, 0)
+
+	for {
+		lsNlriType := binary.BigEndian.Uint16(b[:2])
+		lsNlriLen := int(binary.BigEndian.Uint16(b[2:4]))
+		b = b[4:]
+
+		if len(b) < lsNlriLen {
+			return nil, tooShortErr
+		}
+
+		NlriToDecode := b[:lsNlriLen]
+		b = b[lsNlriLen:]
+
+		switch lsNlriType {
+		case uint16(LinkStateNlriNodeType):
+			node := &LinkStateNlriNode{}
+			err := node.deserialize(NlriToDecode)
+			if err != nil {
+				return nil, err
+			}
+			nlri = append(nlri, node)
+		case uint16(LinkStateNlriLinkType):
+			link := &LinkStateNlriLink{}
+			err := link.deserialize(NlriToDecode)
+			if err != nil {
+				return nil, err
+			}
+			nlri = append(nlri, link)
+		case uint16(LinkStateNlriIPv4PrefixType):
+			prefix := &LinkStateNlriIPv4Prefix{}
+			err := prefix.deserialize(NlriToDecode)
+			if err != nil {
+				return nil, err
+			}
+			nlri = append(nlri, prefix)
+		case uint16(LinkStateNlriIPv6PrefixType):
+			prefix := &LinkStateNlriIPv6Prefix{}
+			err := prefix.deserialize(NlriToDecode)
+			if err != nil {
+				return nil, err
+			}
+			nlri = append(nlri, prefix)
+		default:
+			return nil, &errWithNotification{
+				error:   errors.New("unknown link state nlri type"),
+				code:    NotifErrCodeUpdateMessage,
+				subcode: NotifErrSubcodeMalformedAttr,
+			}
+		}
+
+		if len(b) == 0 {
+			break
+		}
+	}
+
+	return nlri, nil
 }
 
 func (p *PathAttrMpReach) serialize() ([]byte, error) {
@@ -1929,20 +2009,24 @@ func (p *PathAttrMpReach) serialize() ([]byte, error) {
 		Optional: true,
 	}
 
-	nlri, err := p.NLRI.serialize()
-	if err != nil {
-		return nil, err
+	b := make([]byte, 0, 512)
+	for _, n := range p.Nlri {
+		nlri, err := n.serialize()
+		if err != nil {
+			return nil, err
+		}
+		b = append(b, nlri...)
 	}
 
 	// prepend reserved byte, nh len, safi, afi
-	nlri = append([]byte{0}, nlri...)
-	nlri = append([]byte{0}, nlri...)
-	nlri = append([]byte{byte(p.SAFI)}, nlri...)
+	b = append([]byte{0}, b...)
+	b = append([]byte{0}, b...)
+	b = append([]byte{byte(p.Safi)}, b...)
 	afi := make([]byte, 2)
-	binary.BigEndian.PutUint16(afi, uint16(p.AFI))
-	nlri = append(afi, nlri...)
+	binary.BigEndian.PutUint16(afi, uint16(p.Afi))
+	b = append(afi, b...)
 
-	if len(nlri) > math.MaxUint8 {
+	if len(b) > math.MaxUint8 {
 		p.f.ExtendedLength = true
 	}
 	flags, err := p.f.serialize()
@@ -1950,21 +2034,21 @@ func (p *PathAttrMpReach) serialize() ([]byte, error) {
 		return nil, err
 	}
 
-	b := make([]byte, 2)
-	b[0] = flags
-	b[1] = byte(PathAttrMpReachType)
+	c := make([]byte, 2)
+	c[0] = flags
+	c[1] = byte(PathAttrMpReachType)
 
 	if p.f.ExtendedLength {
 		attrLen := make([]byte, 2)
-		binary.BigEndian.PutUint16(attrLen, uint16(len(nlri)))
-		b = append(b, attrLen...)
+		binary.BigEndian.PutUint16(attrLen, uint16(len(b)))
+		c = append(c, attrLen...)
 	} else {
-		b = append(b, []byte{uint8(len(nlri))}...)
+		c = append(c, []byte{uint8(len(b))}...)
 	}
 
-	b = append(b, nlri...)
+	c = append(c, b...)
 
-	return b, nil
+	return c, nil
 }
 
 // Flags returns the PathAttrFlags for PathAttrMpReach.
@@ -1982,9 +2066,9 @@ func (p *PathAttrMpReach) Type() PathAttrType {
 // https://tools.ietf.org/html/rfc4760#section-4
 type PathAttrMpUnreach struct {
 	f    PathAttrFlags
-	AFI  MultiprotoAFI
-	SAFI MultiprotoSAFI
-	NLRI NLRI
+	Afi  MultiprotoAfi
+	Safi MultiprotoSafi
+	Nlri []LinkStateNlri
 }
 
 /*
@@ -2009,18 +2093,16 @@ func (p *PathAttrMpUnreach) deserialize(f PathAttrFlags, b []byte) error {
 		return tooShortErr
 	}
 
-	p.AFI = MultiprotoAFI(binary.BigEndian.Uint16(b[:2]))
-	p.SAFI = MultiprotoSAFI(b[2])
+	p.Afi = MultiprotoAfi(binary.BigEndian.Uint16(b[:2]))
+	p.Safi = MultiprotoSafi(b[2])
 	b = b[3:]
 
-	if p.AFI == BgpLsAFI && p.SAFI == BgpLsSAFI {
-		p.NLRI = &NLRILinkState{}
-	} else {
-		p.NLRI = &NLRIUnknown{}
-	}
-	err := p.NLRI.deserialize(b)
+	nlri, err := deserializeLinkStateNlri(p.Afi, p.Safi, b)
 	if err != nil {
 		return err
+	}
+	for _, n := range nlri {
+		p.Nlri = append(p.Nlri, n)
 	}
 
 	return nil
@@ -2031,18 +2113,22 @@ func (p *PathAttrMpUnreach) serialize() ([]byte, error) {
 		Optional: true,
 	}
 
-	nlri, err := p.NLRI.serialize()
-	if err != nil {
-		return nil, err
+	b := make([]byte, 0, 512)
+	for _, n := range p.Nlri {
+		nlri, err := n.serialize()
+		if err != nil {
+			return nil, err
+		}
+		b = append(b, nlri...)
 	}
 
 	// prepend safi and afi
-	nlri = append([]byte{byte(p.SAFI)}, nlri...)
+	b = append([]byte{byte(p.Safi)}, b...)
 	afi := make([]byte, 2)
-	binary.BigEndian.PutUint16(afi, uint16(p.AFI))
-	nlri = append(afi, nlri...)
+	binary.BigEndian.PutUint16(afi, uint16(p.Afi))
+	b = append(afi, b...)
 
-	if len(nlri) > math.MaxUint8 {
+	if len(b) > math.MaxUint8 {
 		p.f.ExtendedLength = true
 	}
 	flags, err := p.f.serialize()
@@ -2050,21 +2136,21 @@ func (p *PathAttrMpUnreach) serialize() ([]byte, error) {
 		return nil, err
 	}
 
-	b := make([]byte, 2)
-	b[0] = flags
-	b[1] = byte(PathAttrMpUnreachType)
+	c := make([]byte, 2)
+	c[0] = flags
+	c[1] = byte(PathAttrMpUnreachType)
 
 	if p.f.ExtendedLength {
 		attrLen := make([]byte, 2)
-		binary.BigEndian.PutUint16(attrLen, uint16(len(nlri)))
-		b = append(b, attrLen...)
+		binary.BigEndian.PutUint16(attrLen, uint16(len(b)))
+		c = append(c, attrLen...)
 	} else {
-		b = append(b, []byte{uint8(len(nlri))}...)
+		c = append(c, []byte{uint8(len(b))}...)
 	}
 
-	b = append(b, nlri...)
+	c = append(c, b...)
 
-	return b, nil
+	return c, nil
 }
 
 // Flags returns the PathAttrFlags for PathAttrMpUnreach.
@@ -2077,137 +2163,13 @@ func (p *PathAttrMpUnreach) Type() PathAttrType {
 	return PathAttrMpUnreachType
 }
 
-// NLRI is network layer reachability information and is contained in a multiprotocol (un)reachable path attribute.
-//
-// https://tools.ietf.org/html/rfc4760#section-3
-type NLRI interface {
-	AFI() MultiprotoAFI
-	SAFI() MultiprotoSAFI
-	deserialize(b []byte) error
+// LinkStateNlri contains nlri of link-state type.
+type LinkStateNlri interface {
+	Type() LinkStateNlriType
+	Afi() MultiprotoAfi
+	Safi() MultiprotoSafi
 	serialize() ([]byte, error)
-}
-
-// NLRIUnknown is an unknown type of nlri.
-type NLRIUnknown struct {
-	a    MultiprotoAFI
-	s    MultiprotoSAFI
-	data []byte
-}
-
-// AFI returns the address family id for NLRIUnknown.
-func (n *NLRIUnknown) AFI() MultiprotoAFI {
-	return n.a
-}
-
-// SAFI returns the subsequent address family id for NLRIUnknown.
-func (n *NLRIUnknown) SAFI() MultiprotoSAFI {
-	return n.s
-}
-
-// noop
-func (n *NLRIUnknown) serialize() ([]byte, error) {
-	return nil, nil
-}
-
-func (n *NLRIUnknown) deserialize(b []byte) error {
-	n.data = b
-	return nil
-}
-
-// NLRILinkState are contained in an NLRI for bgp-ls.
-//
-// https://tools.ietf.org/html/rfc7752#section-3.2
-type NLRILinkState struct {
-	Nodes    []LinkStateNlriNode
-	Links    []LinkStateNlriLink
-	Prefixes []LinkStateNlriPrefix
-}
-
-// AFI returns the address family id for NLRILinkState.
-func (ls *NLRILinkState) AFI() MultiprotoAFI {
-	return BgpLsAFI
-}
-
-// SAFI returns the subsequent address family id for NLRILinkState.
-func (ls *NLRILinkState) SAFI() MultiprotoSAFI {
-	return BgpLsSAFI
-}
-
-// TODO: serialize NLRILinkState
-func (ls *NLRILinkState) serialize() ([]byte, error) {
-	return nil, nil
-}
-
-func (ls *NLRILinkState) deserialize(b []byte) error {
-	if len(b) == 0 {
-		return nil
-	}
-
-	tooShortErr := &errWithNotification{
-		error:   errors.New("link state NLRI attribute too short"),
-		code:    NotifErrCodeUpdateMessage,
-		subcode: NotifErrSubcodeMalformedAttr,
-	}
-
-	if len(b) < 4 {
-		return tooShortErr
-	}
-
-	for {
-		lsNlriType := binary.BigEndian.Uint16(b[:2])
-		lsNlriLen := int(binary.BigEndian.Uint16(b[2:4]))
-		b = b[4:]
-
-		if len(b) < lsNlriLen {
-			return tooShortErr
-		}
-
-		NLRIToDecode := b[:lsNlriLen]
-		b = b[lsNlriLen:]
-
-		switch lsNlriType {
-		case uint16(LinkStateNlriNodeType):
-			node := LinkStateNlriNode{}
-			err := node.deserialize(NLRIToDecode)
-			if err != nil {
-				return err
-			}
-			ls.Nodes = append(ls.Nodes, node)
-		case uint16(LinkStateNlriLinkType):
-			link := LinkStateNlriLink{}
-			err := link.deserialize(NLRIToDecode)
-			if err != nil {
-				return err
-			}
-			ls.Links = append(ls.Links, link)
-		case uint16(LinkStateNlriIpv4PrefixType):
-			prefix := LinkStateNlriPrefix{}
-			err := prefix.deserialize(NLRIToDecode)
-			if err != nil {
-				return err
-			}
-			ls.Prefixes = append(ls.Prefixes, prefix)
-		case uint16(LinkStateNlriIpv6PrefixType):
-			prefix := LinkStateNlriPrefix{}
-			err := prefix.deserialize(NLRIToDecode)
-			if err != nil {
-				return err
-			}
-			ls.Prefixes = append(ls.Prefixes, prefix)
-		default:
-			return &errWithNotification{
-				error:   errors.New("unknown link state NLRI type"),
-				code:    NotifErrCodeUpdateMessage,
-				subcode: NotifErrSubcodeMalformedAttr,
-			}
-		}
-
-		if len(b) == 0 {
-			break
-		}
-	}
-
-	return nil
+	deserialize(b []byte) error
 }
 
 // LinkStateNlriType describes the type of bgp-ls nlri.
@@ -2220,8 +2182,8 @@ const (
 	_ LinkStateNlriType = iota
 	LinkStateNlriNodeType
 	LinkStateNlriLinkType
-	LinkStateNlriIpv4PrefixType
-	LinkStateNlriIpv6PrefixType
+	LinkStateNlriIPv4PrefixType
+	LinkStateNlriIPv6PrefixType
 )
 
 // LinkStateNlriProtocolID describes the protocol of the link state nlri.
@@ -2240,13 +2202,28 @@ const (
 	LinkStateNlriOSPFv3ProtocolID
 )
 
-// LinkStateNlriNode is a link state NLRI.
+// LinkStateNlriNode is a link state nlri.
 //
 // https://tools.ietf.org/html/rfc7752#section-3.2 figure 7
 type LinkStateNlriNode struct {
 	ProtocolID           LinkStateNlriProtocolID
 	ID                   uint64
 	LocalNodeDescriptors []NodeDescriptor
+}
+
+// Type returns the appropriate LinkStateNlriType for LinkStateNlriNode
+func (n *LinkStateNlriNode) Type() LinkStateNlriType {
+	return LinkStateNlriNodeType
+}
+
+// Afi returns the appropriate MultiprotoAfi for LinkStateNlriNode
+func (n *LinkStateNlriNode) Afi() MultiprotoAfi {
+	return BgpLsAfi
+}
+
+// Safi returns the appropriate MultiprotoAfi for LinkStateNlriNode
+func (n *LinkStateNlriNode) Safi() MultiprotoSafi {
+	return BgpLsSafi
 }
 
 // LinkStateNlriDescriptorCode describes the type of link state nlri.
@@ -2404,7 +2381,7 @@ func deserializeNodeDescriptors(protocolID LinkStateNlriProtocolID, b []byte) ([
 */
 func (n *LinkStateNlriNode) deserialize(b []byte) error {
 	tooShortErr := &errWithNotification{
-		error:   errors.New("link state node NLRI too short"),
+		error:   errors.New("link state node nlri too short"),
 		code:    NotifErrCodeUpdateMessage,
 		subcode: NotifErrSubcodeMalformedAttr,
 	}
@@ -2420,7 +2397,7 @@ func (n *LinkStateNlriNode) deserialize(b []byte) error {
 	// local node descriptors TLV
 	if binary.BigEndian.Uint16(b[:2]) != uint16(LinkStateNlriLocalNodeDescriptorsDescriptorCode) {
 		return &errWithNotification{
-			error:   errors.New("link state node NLRI local node descriptors tlv type invalid"),
+			error:   errors.New("link state node nlri local node descriptors tlv type invalid"),
 			code:    NotifErrCodeUpdateMessage,
 			subcode: NotifErrSubcodeMalformedAttr,
 		}
@@ -2428,7 +2405,7 @@ func (n *LinkStateNlriNode) deserialize(b []byte) error {
 	// len of local node descriptors, no other descriptors should follow
 	if int(binary.BigEndian.Uint16(b[2:4])) != len(b[4:]) {
 		return &errWithNotification{
-			error:   errors.New("link state node NLRI local node descriptors tlv length invalid"),
+			error:   errors.New("link state node nlri local node descriptors tlv length invalid"),
 			code:    NotifErrCodeUpdateMessage,
 			subcode: NotifErrSubcodeMalformedAttr,
 		}
@@ -2444,11 +2421,34 @@ func (n *LinkStateNlriNode) deserialize(b []byte) error {
 	return nil
 }
 
+func (n *LinkStateNlriNode) serialize() ([]byte, error) {
+	nodes := make([]byte, 0, 512)
+	for _, d := range n.LocalNodeDescriptors {
+		e, err := d.serialize()
+		if err != nil {
+			return nil, err
+		}
+		nodes = append(nodes, e...)
+	}
+
+	b := make([]byte, 17)
+	binary.BigEndian.PutUint16(b[:2], uint16(LinkStateNlriNodeType))
+	binary.BigEndian.PutUint16(b[2:], uint16(len(nodes)+13))
+	b[4] = uint8(n.ProtocolID)
+	binary.BigEndian.PutUint64(b[5:], n.ID)
+	binary.BigEndian.PutUint16(b[13:], uint16(LinkStateNlriLocalNodeDescriptorsDescriptorCode))
+	binary.BigEndian.PutUint16(b[15:], uint16(len(nodes)))
+	b = append(b, nodes...)
+
+	return b, nil
+}
+
 // NodeDescriptor is a bgp-ls nlri node descriptor.
 //
 // https://tools.ietf.org/html/rfc7752#section-3.2.1
 type NodeDescriptor interface {
 	Code() NodeDescriptorCode
+	serialize() ([]byte, error)
 }
 
 // NodeDescriptorCode describes the type of node descriptor.
@@ -2489,6 +2489,14 @@ func (n *NodeDescriptorASN) deserialize(b []byte) error {
 	return nil
 }
 
+func (n *NodeDescriptorASN) serialize() ([]byte, error) {
+	b := make([]byte, 8)
+	binary.BigEndian.PutUint16(b[:2], uint16(n.Code()))
+	binary.BigEndian.PutUint16(b[2:], uint16(4))
+	binary.BigEndian.PutUint32(b[4:], n.ASN)
+	return b, nil
+}
+
 // NodeDescriptorBgpLsID is a node descriptor contained in a bgp-ls node nlri.
 //
 // https://tools.ietf.org/html/rfc7752#section-3.2.1.4
@@ -2514,6 +2522,11 @@ func (n *NodeDescriptorBgpLsID) deserialize(b []byte) error {
 	return nil
 }
 
+// TODO: serialize
+func (n *NodeDescriptorBgpLsID) serialize() ([]byte, error) {
+	return nil, nil
+}
+
 // NodeDescriptorOspfAreaID is a node descriptor contained in a bgp-ls node nlri.
 //
 // https://tools.ietf.org/html/rfc7752#section-3.2.1.4
@@ -2537,6 +2550,11 @@ func (n *NodeDescriptorOspfAreaID) deserialize(b []byte) error {
 
 	n.ID = binary.BigEndian.Uint32(b)
 	return nil
+}
+
+// TODO: serialize
+func (n *NodeDescriptorOspfAreaID) serialize() ([]byte, error) {
+	return nil, nil
 }
 
 // NodeDescriptorIgpRouterIDType describes the type of igp router id.
@@ -2578,6 +2596,11 @@ func (n *NodeDescriptorIgpRouterIDIsIsNonPseudo) deserialize(b []byte) error {
 	return nil
 }
 
+// TODO: serialize
+func (n *NodeDescriptorIgpRouterIDIsIsNonPseudo) serialize() ([]byte, error) {
+	return nil, nil
+}
+
 // NodeDescriptorIgpRouterIDIsIsPseudo is a node descriptor contained in a bgp-ls node nlri.
 //
 // https://tools.ietf.org/html/rfc7752#section-3.2.1.4
@@ -2604,6 +2627,11 @@ func (n *NodeDescriptorIgpRouterIDIsIsPseudo) deserialize(b []byte) error {
 	n.IsoNodeID = binary.BigEndian.Uint64(b[:8])
 	n.PsnID = b[6]
 	return nil
+}
+
+// TODO: serialize
+func (n *NodeDescriptorIgpRouterIDIsIsPseudo) serialize() ([]byte, error) {
+	return nil, nil
 }
 
 // NodeDescriptorIgpRouterIDOspfNonPseudo is a node descriptor contained in a bgp-ls node nlri.
@@ -2638,6 +2666,11 @@ func (n *NodeDescriptorIgpRouterIDOspfNonPseudo) deserialize(b []byte) error {
 
 	n.RouterID = routerID
 	return nil
+}
+
+// TODO: serialize
+func (n *NodeDescriptorIgpRouterIDOspfNonPseudo) serialize() ([]byte, error) {
+	return nil, nil
 }
 
 // NodeDescriptorIgpRouterIDOspfPseudo is a node descriptor contained in a bgp-ls node nlri.
@@ -2683,6 +2716,11 @@ func (n *NodeDescriptorIgpRouterIDOspfPseudo) deserialize(b []byte) error {
 	n.DrInterfaceToLAN = drInterfaceToLAN
 
 	return nil
+}
+
+// TODO: serialize
+func (n *NodeDescriptorIgpRouterIDOspfPseudo) serialize() ([]byte, error) {
+	return nil, nil
 }
 
 func deserializeLinkDescriptors(id LinkStateNlriProtocolID, b []byte) ([]LinkDescriptor, error) {
@@ -3022,7 +3060,7 @@ func (l *LinkDescriptorMultiTopologyID) deserialize(b []byte) error {
 	return nil
 }
 
-// LinkStateNlriLink is a link state NLRI.
+// LinkStateNlriLink is a link state nlri.
 //
 // https://tools.ietf.org/html/rfc7752#section-3.2 figure 8
 type LinkStateNlriLink struct {
@@ -3031,6 +3069,21 @@ type LinkStateNlriLink struct {
 	LocalNodeDescriptors  []NodeDescriptor
 	RemoteNodeDescriptors []NodeDescriptor
 	LinkDescriptors       []LinkDescriptor
+}
+
+// Type returns the appropriate LinkStateNlriType for LinkStateNlriLink
+func (l *LinkStateNlriLink) Type() LinkStateNlriType {
+	return LinkStateNlriLinkType
+}
+
+// Afi returns the appropriate MultiprotoAfi for LinkStateNlriLink
+func (l *LinkStateNlriLink) Afi() MultiprotoAfi {
+	return BgpLsAfi
+}
+
+// Safi returns the appropriate MultiprotoAfi for LinkStateNlriLink
+func (l *LinkStateNlriLink) Safi() MultiprotoSafi {
+	return BgpLsSafi
 }
 
 /*
@@ -3051,7 +3104,7 @@ type LinkStateNlriLink struct {
 */
 func (l *LinkStateNlriLink) deserialize(b []byte) error {
 	tooShortErr := &errWithNotification{
-		error:   errors.New("link state link NLRI too short"),
+		error:   errors.New("link state link nlri too short"),
 		code:    NotifErrCodeUpdateMessage,
 		subcode: NotifErrSubcodeMalformedAttr,
 	}
@@ -3067,7 +3120,7 @@ func (l *LinkStateNlriLink) deserialize(b []byte) error {
 	// local node descriptors TLV, mandatory
 	if binary.BigEndian.Uint16(b[:2]) != uint16(LinkStateNlriLocalNodeDescriptorsDescriptorCode) {
 		return &errWithNotification{
-			error:   errors.New("link state link NLRI local node descriptors tlv type invalid"),
+			error:   errors.New("link state link nlri local node descriptors tlv type invalid"),
 			code:    NotifErrCodeUpdateMessage,
 			subcode: NotifErrSubcodeMalformedAttr,
 		}
@@ -3091,7 +3144,7 @@ func (l *LinkStateNlriLink) deserialize(b []byte) error {
 	}
 	if binary.BigEndian.Uint16(b[:2]) != uint16(LinkStateNlriRemoteNodeDescriptorsDescriptorCode) {
 		return &errWithNotification{
-			error:   errors.New("link state link NLRI remote node descriptors tlv type invalid"),
+			error:   errors.New("link state link nlri remote node descriptors tlv type invalid"),
 			code:    NotifErrCodeUpdateMessage,
 			subcode: NotifErrSubcodeMalformedAttr,
 		}
@@ -3125,7 +3178,36 @@ func (l *LinkStateNlriLink) deserialize(b []byte) error {
 	return nil
 }
 
-// LinkStateNlriPrefix is a link state NLRI.
+// TODO: serialize
+func (l *LinkStateNlriLink) serialize() ([]byte, error) {
+	return nil, nil
+}
+
+// LinkStateNlriIPv4Prefix is a link state nlri.
+//
+// https://tools.ietf.org/html/rfc7752#section-3.2 figure 9
+type LinkStateNlriIPv4Prefix struct {
+	LinkStateNlriPrefix
+}
+
+// Type returns the appropriate LinkStateNlriType for LinkStateNlriIPv4Prefix
+func (l *LinkStateNlriIPv4Prefix) Type() LinkStateNlriType {
+	return LinkStateNlriIPv4PrefixType
+}
+
+// LinkStateNlriIPv6Prefix is a link state nlri.
+//
+// https://tools.ietf.org/html/rfc7752#section-3.2 figure 9
+type LinkStateNlriIPv6Prefix struct {
+	LinkStateNlriPrefix
+}
+
+// Type returns the appropriate LinkStateNlriType for LinkStateNlriIPv6Prefix
+func (l *LinkStateNlriIPv6Prefix) Type() LinkStateNlriType {
+	return LinkStateNlriIPv6PrefixType
+}
+
+// LinkStateNlriPrefix is a link state nlri.
 //
 // https://tools.ietf.org/html/rfc7752#section-3.2 figure 9
 type LinkStateNlriPrefix struct {
@@ -3133,6 +3215,16 @@ type LinkStateNlriPrefix struct {
 	ID                   uint64
 	LocalNodeDescriptors []NodeDescriptor
 	PrefixDescriptors    []PrefixDescriptor
+}
+
+// Afi returns the appropriate MultiprotoAfi for LinkStateNlriPrefix
+func (l *LinkStateNlriPrefix) Afi() MultiprotoAfi {
+	return BgpLsAfi
+}
+
+// Safi returns the appropriate MultiprotoAfi for LinkStateNlriPrefix
+func (l *LinkStateNlriPrefix) Safi() MultiprotoSafi {
+	return BgpLsSafi
 }
 
 /*
@@ -3151,7 +3243,7 @@ type LinkStateNlriPrefix struct {
 */
 func (l *LinkStateNlriPrefix) deserialize(b []byte) error {
 	tooShortErr := &errWithNotification{
-		error:   errors.New("link state prefix NLRI too short"),
+		error:   errors.New("link state prefix nlri too short"),
 		code:    NotifErrCodeUpdateMessage,
 		subcode: NotifErrSubcodeMalformedAttr,
 	}
@@ -3167,7 +3259,7 @@ func (l *LinkStateNlriPrefix) deserialize(b []byte) error {
 	// local node descriptors TLV, mandatory
 	if binary.BigEndian.Uint16(b[:2]) != uint16(LinkStateNlriLocalNodeDescriptorsDescriptorCode) {
 		return &errWithNotification{
-			error:   errors.New("link state link NLRI local node descriptors tlv type invalid"),
+			error:   errors.New("link state link nlri local node descriptors tlv type invalid"),
 			code:    NotifErrCodeUpdateMessage,
 			subcode: NotifErrSubcodeMalformedAttr,
 		}
@@ -3199,6 +3291,11 @@ func (l *LinkStateNlriPrefix) deserialize(b []byte) error {
 	l.PrefixDescriptors = PrefixDescriptors
 
 	return nil
+}
+
+// TODO: serialize
+func (l *LinkStateNlriPrefix) serialize() ([]byte, error) {
+	return nil, nil
 }
 
 // PrefixDescriptor is a bgp-ls prefix descriptor.

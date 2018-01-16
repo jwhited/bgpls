@@ -69,6 +69,6 @@ func TestOpenMessage(t *testing.T) {
 		t.Fatal("missing multiprotocol capability")
 	}
 	assert.Equal(t, r.capabilityCode(), capCodeMultiproto)
-	assert.Equal(t, r.afi, BgpLsAFI)
-	assert.Equal(t, r.safi, BgpLsSAFI)
+	assert.Equal(t, r.afi, BgpLsAfi)
+	assert.Equal(t, r.safi, BgpLsSafi)
 }

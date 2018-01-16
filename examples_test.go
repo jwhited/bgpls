@@ -56,10 +56,10 @@ func ExampleCollector() {
 			for _, a := range e.Message.PathAttrs {
 				switch b := a.(type) {
 				case *bgpls.PathAttrMpReach:
-					switch e := b.NLRI.(type) {
-					case *bgpls.NLRILinkState:
-						for _, f := range e.Links {
-							for _, g := range f.LinkDescriptors {
+					for _, n := range b.Nlri {
+						switch o := n.(type) {
+						case *bgpls.LinkStateNlriLink:
+							for _, g := range o.LinkDescriptors {
 								switch h := g.(type) {
 								case *bgpls.LinkDescriptorIPv4InterfaceAddress:
 									addr = h.Address
