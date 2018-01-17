@@ -86,6 +86,29 @@ func TestUpdateMessage(t *testing.T) {
 						},
 					},
 				},
+				&LinkStateNlriIPv4Prefix{
+					LinkStateNlriPrefix: LinkStateNlriPrefix{
+						ProtocolID: LinkStateNlriOSPFv2ProtocolID,
+						ID:         uint64(58),
+						LocalNodeDescriptors: []NodeDescriptor{
+							&NodeDescriptorASN{
+								ASN: uint32(64512),
+							},
+						},
+						PrefixDescriptors: []PrefixDescriptor{
+							&PrefixDescriptorIPReachabilityInfo{
+								Prefix:       net.ParseIP("172.16.1.4").To4(),
+								PrefixLength: uint8(32),
+							},
+							&PrefixDescriptorMultiTopologyID{
+								IDs: []uint16{10, 11, 12, 13},
+							},
+							&PrefixDescriptorOspfRouteType{
+								RouteType: OspfRouteTypeExternal1,
+							},
+						},
+					},
+				},
 			},
 		},
 		&PathAttrOrigin{

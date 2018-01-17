@@ -3302,6 +3302,10 @@ func (l *LinkStateNlriIPv4Prefix) Type() LinkStateNlriType {
 	return LinkStateNlriIPv4PrefixType
 }
 
+func (l *LinkStateNlriIPv4Prefix) serialize() ([]byte, error) {
+	return l.LinkStateNlriPrefix.serialize(l.Type())
+}
+
 // LinkStateNlriIPv6Prefix is a link state nlri.
 //
 // https://tools.ietf.org/html/rfc7752#section-3.2 figure 9
@@ -3312,6 +3316,10 @@ type LinkStateNlriIPv6Prefix struct {
 // Type returns the appropriate LinkStateNlriType for LinkStateNlriIPv6Prefix
 func (l *LinkStateNlriIPv6Prefix) Type() LinkStateNlriType {
 	return LinkStateNlriIPv6PrefixType
+}
+
+func (l *LinkStateNlriIPv6Prefix) serialize() ([]byte, error) {
+	return l.LinkStateNlriPrefix.serialize(l.Type())
 }
 
 // LinkStateNlriPrefix is a link state nlri.
@@ -3366,7 +3374,7 @@ func (l *LinkStateNlriPrefix) deserialize(b []byte) error {
 	// local node descriptors TLV, mandatory
 	if binary.BigEndian.Uint16(b[:2]) != uint16(LinkStateNlriLocalNodeDescriptorsDescriptorCode) {
 		return &errWithNotification{
-			error:   errors.New("link state link nlri local node descriptors tlv type invalid"),
+			error:   errors.New("link state prefix nlri local node descriptors tlv type invalid"),
 			code:    NotifErrCodeUpdateMessage,
 			subcode: NotifErrSubcodeMalformedAttr,
 		}
@@ -3400,9 +3408,39 @@ func (l *LinkStateNlriPrefix) deserialize(b []byte) error {
 	return nil
 }
 
-// TODO: serialize
-func (l *LinkStateNlriPrefix) serialize() ([]byte, error) {
-	return nil, nil
+func (l *LinkStateNlriPrefix) serialize(t LinkStateNlriType) ([]byte, error) {
+	localNodes := make([]byte, 0, 512)
+	for _, d := range l.LocalNodeDescriptors {
+		e, err := d.serialize()
+		if err != nil {
+			return nil, err
+		}
+		localNodes = append(localNodes, e...)
+	}
+	prefixes := make([]byte, 0, 512)
+	for _, d := range l.PrefixDescriptors {
+		e, err := d.serialize()
+		if err != nil {
+			return nil, err
+		}
+		prefixes = append(prefixes, e...)
+	}
+
+	b := make([]byte, 17)
+	binary.BigEndian.PutUint16(b[:2], uint16(t))
+	binary.BigEndian.PutUint16(b[2:], uint16(len(localNodes)+len(prefixes)+13))
+	b[4] = uint8(l.ProtocolID)
+	binary.BigEndian.PutUint64(b[5:], l.ID)
+
+	// local nodes
+	binary.BigEndian.PutUint16(b[13:], uint16(LinkStateNlriLocalNodeDescriptorsDescriptorCode))
+	binary.BigEndian.PutUint16(b[15:], uint16(len(localNodes)))
+	b = append(b, localNodes...)
+
+	// prefixes
+	b = append(b, prefixes...)
+
+	return b, nil
 }
 
 // PrefixDescriptor is a bgp-ls prefix descriptor.
@@ -3410,6 +3448,7 @@ func (l *LinkStateNlriPrefix) serialize() ([]byte, error) {
 // https://tools.ietf.org/html/rfc7752#section-3.2.3
 type PrefixDescriptor interface {
 	Code() PrefixDescriptorCode
+	serialize() ([]byte, error)
 }
 
 // PrefixDescriptorCode describes the type of prefix descriptor.
@@ -3507,6 +3546,10 @@ func (p *PrefixDescriptorMultiTopologyID) deserialize(b []byte) error {
 	return nil
 }
 
+func (p *PrefixDescriptorMultiTopologyID) serialize() ([]byte, error) {
+	return serializeMultiTopologyIDs(uint16(p.Code()), p.IDs)
+}
+
 // PrefixDescriptorOspfRouteType is a prefix descriptor contained in a bgp-ls nlri.
 //
 // https://tools.ietf.org/html/rfc7752#section-3.2.3.1
@@ -3557,6 +3600,14 @@ func (p *PrefixDescriptorOspfRouteType) deserialize(b []byte) error {
 	return nil
 }
 
+func (p *PrefixDescriptorOspfRouteType) serialize() ([]byte, error) {
+	b := make([]byte, 5)
+	binary.BigEndian.PutUint16(b[:2], uint16(p.Code()))
+	binary.BigEndian.PutUint16(b[2:], uint16(1))
+	b[4] = uint8(p.RouteType)
+	return b, nil
+}
+
 // PrefixDescriptorIPReachabilityInfo is a prefix descriptor contained in a bgp-ls nlri.
 //
 // https://tools.ietf.org/html/rfc7752#section-3.2.3.2
@@ -3589,6 +3640,27 @@ func (p *PrefixDescriptorIPReachabilityInfo) deserialize(b []byte) error {
 
 	p.Prefix = addr
 	return nil
+}
+
+func (p *PrefixDescriptorIPReachabilityInfo) serialize() ([]byte, error) {
+	b := make([]byte, 5)
+	binary.BigEndian.PutUint16(b[:2], uint16(p.Code()))
+	b[4] = p.PrefixLength
+
+	addr := p.Prefix.To4()
+	if addr == nil {
+		addr = p.Prefix.To16()
+		if addr == nil {
+			return nil, errors.New("invalid address")
+		}
+		binary.BigEndian.PutUint16(b[2:], uint16(17))
+		b = append(b, addr...)
+		return b, nil
+	}
+	binary.BigEndian.PutUint16(b[2:], uint16(5))
+	b = append(b, addr...)
+
+	return b, nil
 }
 
 // PathAttrOrigin is a path attribute.
