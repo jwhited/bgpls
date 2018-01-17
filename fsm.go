@@ -610,7 +610,7 @@ func (f *standardFSM) validateOpen(msg *openMessage) error {
 					}
 				}
 			case *capMultiproto:
-				if cap.afi == BgpLsAFI && cap.safi == BgpLsSAFI {
+				if cap.afi == BgpLsAfi && cap.safi == BgpLsSafi {
 					bgpLsAfFound = true
 				}
 			case *capUnknown:
@@ -620,8 +620,8 @@ func (f *standardFSM) validateOpen(msg *openMessage) error {
 
 	if !bgpLsAfFound {
 		bgpLsCap := &capMultiproto{
-			afi:  BgpLsAFI,
-			safi: BgpLsSAFI,
+			afi:  BgpLsAfi,
+			safi: BgpLsSafi,
 		}
 		b, err := bgpLsCap.serialize()
 		if err != nil {

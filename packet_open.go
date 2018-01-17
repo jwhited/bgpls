@@ -19,8 +19,8 @@ func newOpenMessage(asn uint32, holdTime time.Duration, bgpID net.IP) (*openMess
 						asn: asn,
 					},
 					&capMultiproto{
-						afi:  BgpLsAFI,
-						safi: BgpLsSAFI,
+						afi:  BgpLsAfi,
+						safi: BgpLsSafi,
 					},
 				},
 			},
@@ -346,25 +346,25 @@ func (u *capUnknown) deserialize(b []byte) error {
 	return nil
 }
 
-// MultiprotoAFI identifies the address family for multiprotocol bgp.
-type MultiprotoAFI uint16
+// MultiprotoAfi identifies the address family for multiprotocol bgp.
+type MultiprotoAfi uint16
 
-// MultiprotoAFI values
+// MultiprotoAfi values
 const (
-	BgpLsAFI MultiprotoAFI = 16388
+	BgpLsAfi MultiprotoAfi = 16388
 )
 
-// MultiprotoSAFI identifies the subsequent address family for multiprotocol bgp.
-type MultiprotoSAFI uint8
+// MultiprotoSafi identifies the subsequent address family for multiprotocol bgp.
+type MultiprotoSafi uint8
 
-// MultiprotoSAFI values
+// MultiprotoSafi values
 const (
-	BgpLsSAFI MultiprotoSAFI = 71
+	BgpLsSafi MultiprotoSafi = 71
 )
 
 type capMultiproto struct {
-	afi  MultiprotoAFI
-	safi MultiprotoSAFI
+	afi  MultiprotoAfi
+	safi MultiprotoSafi
 }
 
 func (m *capMultiproto) serialize() ([]byte, error) {
@@ -397,8 +397,8 @@ func (m *capMultiproto) deserialize(b []byte) error {
 		}
 	}
 
-	m.afi = MultiprotoAFI(binary.BigEndian.Uint16(b[:2]))
-	m.safi = MultiprotoSAFI(b[3])
+	m.afi = MultiprotoAfi(binary.BigEndian.Uint16(b[:2]))
+	m.safi = MultiprotoSafi(b[3])
 
 	return nil
 }

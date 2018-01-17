@@ -14,6 +14,103 @@ func TestUpdateMessage(t *testing.T) {
 	unreservedBW[0] = 10000
 
 	attrs := []PathAttr{
+		&PathAttrMpReach{
+			Nlri: []LinkStateNlri{
+				&LinkStateNlriNode{
+					ProtocolID: LinkStateNlriIsIsL1ProtocolID,
+					ID:         uint64(55),
+					LocalNodeDescriptors: []NodeDescriptor{
+						&NodeDescriptorASN{
+							ASN: uint32(64512),
+						},
+						&NodeDescriptorBgpLsID{
+							ID: uint32(64512),
+						},
+						&NodeDescriptorOspfAreaID{
+							ID: uint32(1),
+						},
+						&NodeDescriptorIgpRouterIDIsIsNonPseudo{
+							IsoNodeID: uint64(2),
+						},
+						&NodeDescriptorIgpRouterIDIsIsPseudo{
+							IsoNodeID: uint64(3),
+							PsnID:     uint8(4),
+						},
+					},
+				},
+				&LinkStateNlriNode{
+					ProtocolID: LinkStateNlriOSPFv2ProtocolID,
+					ID:         uint64(56),
+					LocalNodeDescriptors: []NodeDescriptor{
+						&NodeDescriptorIgpRouterIDOspfNonPseudo{
+							RouterID: net.ParseIP("172.16.1.201").To4(),
+						},
+						&NodeDescriptorIgpRouterIDOspfPseudo{
+							DrRouterID:       net.ParseIP("172.16.1.202").To4(),
+							DrInterfaceToLAN: net.ParseIP("172.16.1.203").To4(),
+						},
+					},
+				},
+				&LinkStateNlriLink{
+					ProtocolID: LinkStateNlriOSPFv2ProtocolID,
+					ID:         uint64(57),
+					LocalNodeDescriptors: []NodeDescriptor{
+						&NodeDescriptorASN{
+							ASN: uint32(64512),
+						},
+					},
+					RemoteNodeDescriptors: []NodeDescriptor{
+						&NodeDescriptorASN{
+							ASN: uint32(64512),
+						},
+					},
+					LinkDescriptors: []LinkDescriptor{
+						&LinkDescriptorLinkIDs{
+							LocalID:  uint32(5),
+							RemoteID: uint32(6),
+						},
+						&LinkDescriptorIPv4InterfaceAddress{
+							Address: net.ParseIP("172.16.1.1").To4(),
+						},
+						&LinkDescriptorIPv4NeighborAddress{
+							Address: net.ParseIP("172.16.1.2").To4(),
+						},
+						&LinkDescriptorIPv6InterfaceAddress{
+							Address: net.ParseIP("2601::1").To16(),
+						},
+						&LinkDescriptorIPv6NeighborAddress{
+							Address: net.ParseIP("2601::2").To16(),
+						},
+						&LinkDescriptorMultiTopologyID{
+							IDs: []uint16{1, 2, 3, 4},
+						},
+					},
+				},
+				&LinkStateNlriIPv4Prefix{
+					LinkStateNlriPrefix: LinkStateNlriPrefix{
+						ProtocolID: LinkStateNlriOSPFv2ProtocolID,
+						ID:         uint64(58),
+						LocalNodeDescriptors: []NodeDescriptor{
+							&NodeDescriptorASN{
+								ASN: uint32(64512),
+							},
+						},
+						PrefixDescriptors: []PrefixDescriptor{
+							&PrefixDescriptorIPReachabilityInfo{
+								Prefix:       net.ParseIP("172.16.1.4").To4(),
+								PrefixLength: uint8(32),
+							},
+							&PrefixDescriptorMultiTopologyID{
+								IDs: []uint16{10, 11, 12, 13},
+							},
+							&PrefixDescriptorOspfRouteType{
+								RouteType: OspfRouteTypeExternal1,
+							},
+						},
+					},
+				},
+			},
+		},
 		&PathAttrOrigin{
 			Origin: OriginCodeIGP,
 		},
