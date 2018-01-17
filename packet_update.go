@@ -2301,14 +2301,14 @@ func deserializeNodeDescriptors(protocolID LinkStateNlriProtocolID, b []byte) ([
 			if protocolID == LinkStateNlriIsIsL1ProtocolID || protocolID == LinkStateNlriIsIsL2ProtocolID {
 				switch len(descriptorToDecode) {
 				case 6:
-					descriptor := &NodeDescriptorIgpRouterIDIsIsPseudo{}
+					descriptor := &NodeDescriptorIgpRouterIDIsIsNonPseudo{}
 					err := descriptor.deserialize(descriptorToDecode)
 					if err != nil {
 						return nil, err
 					}
 					descriptors = append(descriptors, descriptor)
 				case 7:
-					descriptor := &NodeDescriptorIgpRouterIDIsIsNonPseudo{}
+					descriptor := &NodeDescriptorIgpRouterIDIsIsPseudo{}
 					err := descriptor.deserialize(descriptorToDecode)
 					if err != nil {
 						return nil, err
@@ -2316,7 +2316,7 @@ func deserializeNodeDescriptors(protocolID LinkStateNlriProtocolID, b []byte) ([
 					descriptors = append(descriptors, descriptor)
 				default:
 					return nil, &errWithNotification{
-						error:   errors.New("link state node igp router id node descriptor has protocol ISIS but invalid length"),
+						error:   errors.New("link state node igp router id node descriptor has protocol is-is but invalid length"),
 						code:    NotifErrCodeUpdateMessage,
 						subcode: NotifErrSubcodeMalformedAttr,
 					}
@@ -2522,9 +2522,12 @@ func (n *NodeDescriptorBgpLsID) deserialize(b []byte) error {
 	return nil
 }
 
-// TODO: serialize
 func (n *NodeDescriptorBgpLsID) serialize() ([]byte, error) {
-	return nil, nil
+	b := make([]byte, 8)
+	binary.BigEndian.PutUint16(b[:2], uint16(n.Code()))
+	binary.BigEndian.PutUint16(b[2:], uint16(4))
+	binary.BigEndian.PutUint32(b[4:], n.ID)
+	return b, nil
 }
 
 // NodeDescriptorOspfAreaID is a node descriptor contained in a bgp-ls node nlri.
@@ -2552,9 +2555,12 @@ func (n *NodeDescriptorOspfAreaID) deserialize(b []byte) error {
 	return nil
 }
 
-// TODO: serialize
 func (n *NodeDescriptorOspfAreaID) serialize() ([]byte, error) {
-	return nil, nil
+	b := make([]byte, 8)
+	binary.BigEndian.PutUint16(b[:2], uint16(n.Code()))
+	binary.BigEndian.PutUint16(b[2:], uint16(4))
+	binary.BigEndian.PutUint32(b[4:], n.ID)
+	return b, nil
 }
 
 // NodeDescriptorIgpRouterIDType describes the type of igp router id.
@@ -2585,7 +2591,7 @@ func (n *NodeDescriptorIgpRouterIDIsIsNonPseudo) Code() NodeDescriptorCode {
 func (n *NodeDescriptorIgpRouterIDIsIsNonPseudo) deserialize(b []byte) error {
 	if len(b) != 6 {
 		return &errWithNotification{
-			error:   errors.New("node descriptor igp router ID IsIs non-pseudo invalid length"),
+			error:   errors.New("node descriptor igp router ID is-is non-pseudo invalid length"),
 			code:    NotifErrCodeUpdateMessage,
 			subcode: NotifErrSubcodeMalformedAttr,
 		}
@@ -2596,9 +2602,15 @@ func (n *NodeDescriptorIgpRouterIDIsIsNonPseudo) deserialize(b []byte) error {
 	return nil
 }
 
-// TODO: serialize
 func (n *NodeDescriptorIgpRouterIDIsIsNonPseudo) serialize() ([]byte, error) {
-	return nil, nil
+	b := make([]byte, 4)
+	binary.BigEndian.PutUint16(b[:2], uint16(n.Code()))
+	binary.BigEndian.PutUint16(b[2:], uint16(6))
+	c := make([]byte, 8)
+	binary.BigEndian.PutUint64(c, n.IsoNodeID)
+	// 2 bytes are padded 0s
+	b = append(b, c[2:]...)
+	return b, nil
 }
 
 // NodeDescriptorIgpRouterIDIsIsPseudo is a node descriptor contained in a bgp-ls node nlri.
@@ -2617,7 +2629,7 @@ func (n *NodeDescriptorIgpRouterIDIsIsPseudo) Code() NodeDescriptorCode {
 func (n *NodeDescriptorIgpRouterIDIsIsPseudo) deserialize(b []byte) error {
 	if len(b) != 7 {
 		return &errWithNotification{
-			error:   errors.New("node descriptor igp router ID IsIs pseudo invalid length"),
+			error:   errors.New("node descriptor igp router ID is-is pseudo invalid length"),
 			code:    NotifErrCodeUpdateMessage,
 			subcode: NotifErrSubcodeMalformedAttr,
 		}
@@ -2625,13 +2637,20 @@ func (n *NodeDescriptorIgpRouterIDIsIsPseudo) deserialize(b []byte) error {
 
 	b = append([]byte{0, 0}, b...)
 	n.IsoNodeID = binary.BigEndian.Uint64(b[:8])
-	n.PsnID = b[6]
+	n.PsnID = b[8]
 	return nil
 }
 
-// TODO: serialize
 func (n *NodeDescriptorIgpRouterIDIsIsPseudo) serialize() ([]byte, error) {
-	return nil, nil
+	b := make([]byte, 4)
+	binary.BigEndian.PutUint16(b[:2], uint16(n.Code()))
+	binary.BigEndian.PutUint16(b[2:], uint16(7))
+	c := make([]byte, 8)
+	binary.BigEndian.PutUint64(c, n.IsoNodeID)
+	// 2 bytes are padded 0s
+	b = append(b, c[2:]...)
+	b = append(b, uint8(n.PsnID))
+	return b, nil
 }
 
 // NodeDescriptorIgpRouterIDOspfNonPseudo is a node descriptor contained in a bgp-ls node nlri.
@@ -2668,9 +2687,8 @@ func (n *NodeDescriptorIgpRouterIDOspfNonPseudo) deserialize(b []byte) error {
 	return nil
 }
 
-// TODO: serialize
 func (n *NodeDescriptorIgpRouterIDOspfNonPseudo) serialize() ([]byte, error) {
-	return nil, nil
+	return serializeBgpLsIPv4TLV(uint16(n.Code()), n.RouterID)
 }
 
 // NodeDescriptorIgpRouterIDOspfPseudo is a node descriptor contained in a bgp-ls node nlri.
@@ -2718,9 +2736,23 @@ func (n *NodeDescriptorIgpRouterIDOspfPseudo) deserialize(b []byte) error {
 	return nil
 }
 
-// TODO: serialize
 func (n *NodeDescriptorIgpRouterIDOspfPseudo) serialize() ([]byte, error) {
-	return nil, nil
+	b := make([]byte, 4)
+	binary.BigEndian.PutUint16(b[:2], uint16(n.Code()))
+	binary.BigEndian.PutUint16(b[2:], uint16(8))
+
+	routerID := n.DrRouterID.To4()
+	if routerID == nil {
+		return nil, errors.New("invalid dr router ID")
+	}
+	b = append(b, routerID...)
+	lan := n.DrInterfaceToLAN.To4()
+	if lan == nil {
+		return nil, errors.New("invalid dr interface to lan")
+	}
+
+	b = append(b, lan...)
+	return b, nil
 }
 
 func deserializeLinkDescriptors(id LinkStateNlriProtocolID, b []byte) ([]LinkDescriptor, error) {
@@ -2808,6 +2840,7 @@ func deserializeLinkDescriptors(id LinkStateNlriProtocolID, b []byte) ([]LinkDes
 // LinkDescriptor is a bgp-ls nlri.
 type LinkDescriptor interface {
 	Code() LinkDescriptorCode
+	serialize() ([]byte, error)
 }
 
 // LinkDescriptorCode describes the type of link descriptor.
@@ -2852,6 +2885,15 @@ func (l *LinkDescriptorLinkIDs) deserialize(b []byte) error {
 	return nil
 }
 
+func (l *LinkDescriptorLinkIDs) serialize() ([]byte, error) {
+	b := make([]byte, 12)
+	binary.BigEndian.PutUint16(b[:2], uint16(l.Code()))
+	binary.BigEndian.PutUint16(b[2:], uint16(8))
+	binary.BigEndian.PutUint32(b[4:], l.LocalID)
+	binary.BigEndian.PutUint32(b[8:], l.RemoteID)
+	return b, nil
+}
+
 // LinkDescriptorIPv4InterfaceAddress is a link descriptor contained in a bgp-ls link nlri.
 //
 // https://tools.ietf.org/html/rfc5305#section-3.2
@@ -2884,6 +2926,10 @@ func (l *LinkDescriptorIPv4InterfaceAddress) deserialize(b []byte) error {
 
 	l.Address = address
 	return nil
+}
+
+func (l *LinkDescriptorIPv4InterfaceAddress) serialize() ([]byte, error) {
+	return serializeBgpLsIPv4TLV(uint16(l.Code()), l.Address)
 }
 
 // LinkDescriptorIPv4NeighborAddress is a link descriptor contained in a bgp-ls link nlri.
@@ -2920,6 +2966,10 @@ func (l *LinkDescriptorIPv4NeighborAddress) deserialize(b []byte) error {
 	return nil
 }
 
+func (l *LinkDescriptorIPv4NeighborAddress) serialize() ([]byte, error) {
+	return serializeBgpLsIPv4TLV(uint16(l.Code()), l.Address)
+}
+
 // LinkDescriptorIPv6InterfaceAddress is a link descriptor contained in a bgp-ls link nlri.
 //
 // https://tools.ietf.org/html/rfc6119#section-4.2
@@ -2954,6 +3004,10 @@ func (l *LinkDescriptorIPv6InterfaceAddress) deserialize(b []byte) error {
 	return nil
 }
 
+func (l *LinkDescriptorIPv6InterfaceAddress) serialize() ([]byte, error) {
+	return serializeBgpLsIPv6TLV(uint16(l.Code()), l.Address)
+}
+
 // LinkDescriptorIPv6NeighborAddress is a link descriptor contained in a bgp-ls link nlri.
 //
 // https://tools.ietf.org/html/rfc6119#section-4.3
@@ -2986,6 +3040,10 @@ func (l *LinkDescriptorIPv6NeighborAddress) deserialize(b []byte) error {
 
 	l.Address = address
 	return nil
+}
+
+func (l *LinkDescriptorIPv6NeighborAddress) serialize() ([]byte, error) {
+	return serializeBgpLsIPv6TLV(uint16(l.Code()), l.Address)
 }
 
 func serializeMultiTopologyIDs(t uint16, ids []uint16) ([]byte, error) {
@@ -3058,6 +3116,10 @@ func (l *LinkDescriptorMultiTopologyID) deserialize(b []byte) error {
 
 	l.IDs = ids
 	return nil
+}
+
+func (l *LinkDescriptorMultiTopologyID) serialize() ([]byte, error) {
+	return serializeMultiTopologyIDs(uint16(l.Code()), l.IDs)
 }
 
 // LinkStateNlriLink is a link state nlri.
@@ -3178,9 +3240,54 @@ func (l *LinkStateNlriLink) deserialize(b []byte) error {
 	return nil
 }
 
-// TODO: serialize
 func (l *LinkStateNlriLink) serialize() ([]byte, error) {
-	return nil, nil
+	localNodes := make([]byte, 0, 512)
+	for _, d := range l.LocalNodeDescriptors {
+		e, err := d.serialize()
+		if err != nil {
+			return nil, err
+		}
+		localNodes = append(localNodes, e...)
+	}
+	remoteNodes := make([]byte, 0, 512)
+	for _, d := range l.RemoteNodeDescriptors {
+		e, err := d.serialize()
+		if err != nil {
+			return nil, err
+		}
+		remoteNodes = append(remoteNodes, e...)
+	}
+	links := make([]byte, 0, 512)
+	for _, d := range l.LinkDescriptors {
+		e, err := d.serialize()
+		if err != nil {
+			return nil, err
+		}
+		links = append(links, e...)
+	}
+
+	b := make([]byte, 17)
+	binary.BigEndian.PutUint16(b[:2], uint16(LinkStateNlriLinkType))
+	binary.BigEndian.PutUint16(b[2:], uint16(len(localNodes)+len(remoteNodes)+len(links)+17))
+	b[4] = uint8(l.ProtocolID)
+	binary.BigEndian.PutUint64(b[5:], l.ID)
+
+	// local nodes
+	binary.BigEndian.PutUint16(b[13:], uint16(LinkStateNlriLocalNodeDescriptorsDescriptorCode))
+	binary.BigEndian.PutUint16(b[15:], uint16(len(localNodes)))
+	b = append(b, localNodes...)
+
+	// remote nodes
+	r := make([]byte, 4)
+	binary.BigEndian.PutUint16(r[:2], uint16(LinkStateNlriRemoteNodeDescriptorsDescriptorCode))
+	binary.BigEndian.PutUint16(r[2:], uint16(len(remoteNodes)))
+	b = append(b, r...)
+	b = append(b, remoteNodes...)
+
+	// links
+	b = append(b, links...)
+
+	return b, nil
 }
 
 // LinkStateNlriIPv4Prefix is a link state nlri.
