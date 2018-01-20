@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strconv"
 	"sync"
 	"time"
 
@@ -49,13 +50,11 @@ func (s FSMState) String() string {
 
 var (
 	errInvalidStateTransition = errors.New("invalid state transition")
+	defaultPort               = 179
 )
 
 const (
 	connectRetryTime = time.Second * 5
-)
-
-const (
 	loggerErrorField = "error"
 )
 
@@ -67,7 +66,7 @@ type fsm interface {
 type standardFSM struct {
 	events            chan Event
 	disable           chan interface{}
-	neighbor          neighbor
+	neighborConfig    *NeighborConfig
 	localASN          uint32
 	logger            *logrus.Entry
 	conn              net.Conn
@@ -84,17 +83,17 @@ type standardFSM struct {
 	*sync.RWMutex
 }
 
-func newFSM(neighbor neighbor, events chan Event, localASN uint32) fsm {
+func newFSM(c *NeighborConfig, events chan Event, localASN uint32) fsm {
 	f := &standardFSM{
 		events:            events,
 		disable:           make(chan interface{}),
-		neighbor:          neighbor,
+		neighborConfig:    c,
 		localASN:          localASN,
-		logger:            logrus.WithField("neighbor", neighbor.config().Address.String()),
+		logger:            logrus.WithField("neighbor", c.Address.String()),
 		s:                 IdleState,
-		keepAliveTime:     time.Duration(int64(neighbor.config().HoldTime) / 3).Truncate(time.Second),
+		keepAliveTime:     time.Duration(int64(c.HoldTime) / 3).Truncate(time.Second),
 		keepAliveTimer:    time.NewTimer(0),
-		holdTime:          neighbor.config().HoldTime,
+		holdTime:          c.HoldTime,
 		holdTimer:         time.NewTimer(0),
 		connectRetryTimer: time.NewTimer(0),
 		RWMutex:           &sync.RWMutex{},
@@ -151,7 +150,7 @@ func (f *standardFSM) connect() FSMState {
 	f.connectRetryTimer.Reset(connectRetryTime)
 
 	go func() {
-		conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(f.neighbor.config().Address.String(), "179"))
+		conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(f.neighborConfig.Address.String(), strconv.Itoa(defaultPort)))
 		if err != nil {
 			connectErrorChan <- err
 			return
@@ -176,7 +175,7 @@ func (f *standardFSM) connect() FSMState {
 	case err := <-connectErrorChan:
 		cancel()
 
-		event := newEventNeighborErr(f.neighbor.config(), fmt.Errorf("error connecting to neighbor: %v", err))
+		event := newEventNeighborErr(f.neighborConfig, fmt.Errorf("error connecting to neighbor: %v", err))
 		select {
 		case f.events <- event:
 		case <-f.disable:
@@ -199,9 +198,9 @@ func (f *standardFSM) connect() FSMState {
 		go f.read()
 	}
 
-	o, err := newOpenMessage(f.localASN, f.holdTime, f.neighbor.config().Address)
+	o, err := newOpenMessage(f.localASN, f.holdTime, f.neighborConfig.Address)
 	if err != nil {
-		event := newEventNeighborErr(f.neighbor.config(), fmt.Errorf("error creating open message: %v", err))
+		event := newEventNeighborErr(f.neighborConfig, fmt.Errorf("error creating open message: %v", err))
 		select {
 		case f.events <- event:
 		case <-f.disable:
@@ -219,7 +218,7 @@ func (f *standardFSM) connect() FSMState {
 
 	_, err = f.conn.Write(b)
 	if err != nil {
-		event := newEventNeighborErr(f.neighbor.config(), fmt.Errorf("error sending open message: %v", err))
+		event := newEventNeighborErr(f.neighborConfig, fmt.Errorf("error sending open message: %v", err))
 		select {
 		case f.events <- event:
 		case <-f.disable:
@@ -250,7 +249,7 @@ func (f *standardFSM) handleErr(err error, nextState FSMState) FSMState {
 		f.sendNotification(err.code, err.subcode, err.data)
 	}
 
-	event := newEventNeighborErr(f.neighbor.config(), err)
+	event := newEventNeighborErr(f.neighborConfig, err)
 	select {
 	case f.events <- event:
 	case <-f.disable:
@@ -267,7 +266,7 @@ func (f *standardFSM) handleErr(err error, nextState FSMState) FSMState {
 func (f *standardFSM) handleHoldTimerExpired(nextState FSMState) FSMState {
 	f.sendHoldTimerExpired()
 
-	event := newEventNeighborHoldTimerExpired(f.neighbor.config())
+	event := newEventNeighborHoldTimerExpired(f.neighborConfig)
 	select {
 	case f.events <- event:
 	case <-f.disable:
@@ -342,7 +341,7 @@ func (f *standardFSM) openSent() FSMState {
 		if !isOpen {
 			notif, isNotif := m.(*NotificationMessage)
 			if isNotif {
-				event := newEventNeighborNotificationReceived(f.neighbor.config(), notif)
+				event := newEventNeighborNotificationReceived(f.neighborConfig, notif)
 				select {
 				case f.events <- event:
 				case <-f.disable:
@@ -433,7 +432,7 @@ func (f *standardFSM) established() FSMState {
 				f.drainAndResetHoldTimer()
 			case *UpdateMessage:
 				f.drainAndResetHoldTimer()
-				event := newEventNeighborUpdateReceived(f.neighbor.config(), m)
+				event := newEventNeighborUpdateReceived(f.neighborConfig, m)
 
 				select {
 				case f.events <- event:
@@ -444,7 +443,7 @@ func (f *standardFSM) established() FSMState {
 					return DisabledState
 				}
 			case *NotificationMessage:
-				event := newEventNeighborNotificationReceived(f.neighbor.config(), m)
+				event := newEventNeighborNotificationReceived(f.neighborConfig, m)
 				select {
 				case f.events <- event:
 				case <-f.disable:
@@ -457,7 +456,7 @@ func (f *standardFSM) established() FSMState {
 				f.cleanupConn()
 				return IdleState
 			case *openMessage:
-				event := newEventNeighborErr(f.neighbor.config(), errors.New("open message received while in established state"))
+				event := newEventNeighborErr(f.neighborConfig, errors.New("open message received while in established state"))
 				select {
 				case f.events <- event:
 				case <-f.disable:
@@ -482,7 +481,7 @@ func (f *standardFSM) loop() {
 		state := f.state()
 
 		if state != DisabledState {
-			event := newEventNeighborStateTransition(f.neighbor.config(), state)
+			event := newEventNeighborStateTransition(f.neighborConfig, state)
 			select {
 			case f.events <- event:
 			case <-f.disable:
@@ -558,7 +557,7 @@ func (f *standardFSM) validateOpen(msg *openMessage) error {
 	if msg.asn == asTrans {
 		fourOctetAS = true
 	} else {
-		if msg.asn != uint16(f.neighbor.config().ASN) {
+		if msg.asn != uint16(f.neighborConfig.ASN) {
 			return &errWithNotification{
 				error:   errors.New("bad peer AS"),
 				code:    NotifErrCodeOpenMessage,
@@ -602,7 +601,7 @@ func (f *standardFSM) validateOpen(msg *openMessage) error {
 			switch cap := c.(type) {
 			case *capFourOctetAs:
 				fourOctetAsFound = true
-				if cap.asn != f.neighbor.config().ASN {
+				if cap.asn != f.neighborConfig.ASN {
 					return &errWithNotification{
 						error:   errors.New("bad peer AS"),
 						code:    NotifErrCodeOpenMessage,
