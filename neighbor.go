@@ -27,7 +27,7 @@ func newNeighbor(localASN uint32, config *NeighborConfig, events chan Event) (ne
 		c: config,
 	}
 
-	n.fsm = newFSM(n.config(), events, localASN)
+	n.fsm = newFSM(n.config(), events, localASN, 179)
 
 	return n, nil
 }

@@ -38,8 +38,6 @@ func (s *fsmTestSuite) SetupSuite() {
 		s.T().Fatal("unexpected split on listener address string")
 	}
 
-	defaultPort = i
-
 	s.neighborConfig = &NeighborConfig{
 		Address:  net.ParseIP("127.0.0.1"),
 		ASN:      64512,
@@ -47,7 +45,7 @@ func (s *fsmTestSuite) SetupSuite() {
 	}
 
 	s.events = make(chan Event, 1024)
-	s.fsm = newFSM(s.neighborConfig, s.events, 64512)
+	s.fsm = newFSM(s.neighborConfig, s.events, 64512, i)
 
 	conn, err := ln.Accept()
 	if err != nil {

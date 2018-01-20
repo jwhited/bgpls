@@ -64,6 +64,7 @@ type fsm interface {
 }
 
 type standardFSM struct {
+	port              int
 	events            chan Event
 	disable           chan interface{}
 	neighborConfig    *NeighborConfig
@@ -83,8 +84,9 @@ type standardFSM struct {
 	*sync.RWMutex
 }
 
-func newFSM(c *NeighborConfig, events chan Event, localASN uint32) fsm {
+func newFSM(c *NeighborConfig, events chan Event, localASN uint32, port int) fsm {
 	f := &standardFSM{
+		port:              port,
 		events:            events,
 		disable:           make(chan interface{}),
 		neighborConfig:    c,
@@ -150,7 +152,7 @@ func (f *standardFSM) connect() FSMState {
 	f.connectRetryTimer.Reset(connectRetryTime)
 
 	go func() {
-		conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(f.neighborConfig.Address.String(), strconv.Itoa(defaultPort)))
+		conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(f.neighborConfig.Address.String(), strconv.Itoa(f.port)))
 		if err != nil {
 			connectErrorChan <- err
 			return
