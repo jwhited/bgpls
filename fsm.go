@@ -50,7 +50,6 @@ func (s FSMState) String() string {
 
 var (
 	errInvalidStateTransition = errors.New("invalid state transition")
-	defaultPort               = 179
 )
 
 const (

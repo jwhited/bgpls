@@ -20,7 +20,7 @@ type fsmTestSuite struct {
 	fsm            fsm
 }
 
-func (s *fsmTestSuite) SetupSuite() {
+func (s *fsmTestSuite) BeforeTest(_, _ string) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		s.T().Fatal(err)
@@ -55,7 +55,7 @@ func (s *fsmTestSuite) SetupSuite() {
 	s.conn = conn
 }
 
-func (s *fsmTestSuite) TearDownSuite() {
+func (s *fsmTestSuite) AfterTest(_, _ string) {
 	s.conn.Close()
 	s.ln.Close()
 	s.fsm.shut()
@@ -140,7 +140,7 @@ func (s *fsmTestSuite) TestToEstablished() {
 				assert.Equal(s.T(), e.State, EstablishedState)
 			}
 		} else {
-			s.T().Fatal("not a state transition event")
+			s.T().Fatalf("not a state transition event: %s", evt.Type())
 		}
 	}
 }
