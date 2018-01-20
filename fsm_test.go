@@ -116,10 +116,14 @@ func (s *fsmTestSuite) TestToEstablished() {
 		s.T().Fatal(err)
 	}
 
-	_, err = s.readMessagesFromConn()
+	m, err = s.readMessagesFromConn()
 	if err != nil {
 		s.T().Fatal(err)
 	}
+	if !assert.Equal(s.T(), len(m), 1) {
+		s.T().Fatal("invalid number of messages from neighbor")
+	}
+	assert.Equal(s.T(), m[0].MessageType(), KeepAliveMessageType)
 
 	for i := 0; i < 5; i++ {
 		evt := <-s.events
