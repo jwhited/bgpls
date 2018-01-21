@@ -198,6 +198,105 @@ func deserializeOptParams(b []byte) ([]optParam, error) {
 	return params, nil
 }
 
+func validateOpenMessage(msg *openMessage, neighborASN uint32) error {
+	if msg.version != 4 {
+		version := make([]byte, 2)
+		binary.BigEndian.PutUint16(version, uint16(4))
+		return &errWithNotification{
+			error:   errors.New("unsupported version number"),
+			code:    NotifErrCodeOpenMessage,
+			subcode: NotifErrSubcodeUnsupportedVersionNumber,
+			data:    version,
+		}
+	}
+
+	var fourOctetAS, fourOctetAsFound, bgpLsAfFound bool
+	if msg.asn == asTrans {
+		fourOctetAS = true
+	} else {
+		if msg.asn != uint16(neighborASN) {
+			return &errWithNotification{
+				error:   errors.New("bad peer AS"),
+				code:    NotifErrCodeOpenMessage,
+				subcode: NotifErrSubcodeBadPeerAS,
+			}
+		}
+	}
+
+	if msg.holdTime < 3 {
+		return &errWithNotification{
+			error:   errors.New("hold time must be >=3"),
+			code:    NotifErrCodeOpenMessage,
+			subcode: NotifErrSubcodeUnacceptableHoldTime,
+		}
+	}
+
+	if msg.bgpID == 0 {
+		return &errWithNotification{
+			error:   errors.New("bgp ID cannot be 0"),
+			code:    NotifErrCodeOpenMessage,
+			subcode: NotifErrSubcodeBadBgpID,
+		}
+	}
+
+	for _, p := range msg.optParams {
+		capOptParam, isCapability := p.(*capabilityOptParam)
+		if !isCapability {
+			return &errWithNotification{
+				error:   errors.New("non-capability optional parameter found"),
+				code:    NotifErrCodeOpenMessage,
+				subcode: NotifErrSubcodeUnsupportedOptParam,
+			}
+		}
+
+		for _, c := range capOptParam.caps {
+			switch cap := c.(type) {
+			case *capFourOctetAs:
+				fourOctetAsFound = true
+				if cap.asn != neighborASN {
+					return &errWithNotification{
+						error:   errors.New("bad peer AS"),
+						code:    NotifErrCodeOpenMessage,
+						subcode: NotifErrSubcodeBadPeerAS,
+					}
+				}
+			case *capMultiproto:
+				if cap.afi == BgpLsAfi && cap.safi == BgpLsSafi {
+					bgpLsAfFound = true
+				}
+			case *capUnknown:
+			}
+		}
+	}
+
+	if !bgpLsAfFound {
+		bgpLsCap := &capMultiproto{
+			afi:  BgpLsAfi,
+			safi: BgpLsSafi,
+		}
+		b, err := bgpLsCap.serialize()
+		if err != nil {
+			panic("error serializing bgp-ls multiprotocol capability")
+		}
+		return &errWithNotification{
+			error:   errors.New("bgp-ls capability not found"),
+			code:    NotifErrCodeOpenMessage,
+			subcode: NotifErrSubcodeUnsupportedCapability,
+			data:    b,
+		}
+	}
+
+	if fourOctetAS && !fourOctetAsFound {
+		return &errWithNotification{
+			error:   errors.New("4-octet AS indicated in as field but not found in capabilities"),
+			code:    NotifErrCodeOpenMessage,
+			subcode: NotifErrSubcodeBadPeerAS,
+		}
+	}
+
+	return nil
+}
+
 type optParamType uint8
 
 const (

@@ -2,7 +2,6 @@ package bgpls
 
 import (
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"net"
@@ -357,9 +356,14 @@ func (f *standardFSM) openSent() FSMState {
 			return IdleState
 		}
 
-		err := f.validateOpen(open)
+		err := validateOpenMessage(open, f.neighborConfig.ASN)
 		if err != nil {
 			return f.handleErr(err, IdleState)
+		}
+
+		if float64(open.holdTime) < f.holdTime.Seconds() {
+			f.holdTime = time.Duration(int64(open.holdTime) * int64(time.Second))
+			f.keepAliveTime = (f.holdTime / 3).Truncate(time.Second)
 		}
 
 		err = f.sendKeepAlive()
@@ -540,110 +544,6 @@ func (f *standardFSM) sendNotification(code NotifErrCode, subcode NotifErrSubcod
 
 	_, err = f.conn.Write(b)
 	return err
-}
-
-func (f *standardFSM) validateOpen(msg *openMessage) error {
-	if msg.version != 4 {
-		version := make([]byte, 2)
-		binary.BigEndian.PutUint16(version, uint16(4))
-		return &errWithNotification{
-			error:   errors.New("unsupported version number"),
-			code:    NotifErrCodeOpenMessage,
-			subcode: NotifErrSubcodeUnsupportedVersionNumber,
-			data:    version,
-		}
-	}
-
-	var fourOctetAS, fourOctetAsFound, bgpLsAfFound bool
-	if msg.asn == asTrans {
-		fourOctetAS = true
-	} else {
-		if msg.asn != uint16(f.neighborConfig.ASN) {
-			return &errWithNotification{
-				error:   errors.New("bad peer AS"),
-				code:    NotifErrCodeOpenMessage,
-				subcode: NotifErrSubcodeBadPeerAS,
-			}
-		}
-	}
-
-	if msg.holdTime < 3 {
-		return &errWithNotification{
-			error:   errors.New("hold time must be >=3"),
-			code:    NotifErrCodeOpenMessage,
-			subcode: NotifErrSubcodeUnacceptableHoldTime,
-		}
-	}
-
-	if float64(msg.holdTime) < f.holdTime.Seconds() {
-		f.holdTime = time.Duration(int64(msg.holdTime) * int64(time.Second))
-		f.keepAliveTime = (f.holdTime / 3).Truncate(time.Second)
-	}
-
-	if msg.bgpID == 0 {
-		return &errWithNotification{
-			error:   errors.New("bgp ID cannot be 0"),
-			code:    NotifErrCodeOpenMessage,
-			subcode: NotifErrSubcodeBadBgpID,
-		}
-	}
-
-	for _, p := range msg.optParams {
-		capOptParam, isCapability := p.(*capabilityOptParam)
-		if !isCapability {
-			return &errWithNotification{
-				error:   errors.New("non-capability optional parameter found"),
-				code:    NotifErrCodeOpenMessage,
-				subcode: NotifErrSubcodeUnsupportedOptParam,
-			}
-		}
-
-		for _, c := range capOptParam.caps {
-			switch cap := c.(type) {
-			case *capFourOctetAs:
-				fourOctetAsFound = true
-				if cap.asn != f.neighborConfig.ASN {
-					return &errWithNotification{
-						error:   errors.New("bad peer AS"),
-						code:    NotifErrCodeOpenMessage,
-						subcode: NotifErrSubcodeBadPeerAS,
-					}
-				}
-			case *capMultiproto:
-				if cap.afi == BgpLsAfi && cap.safi == BgpLsSafi {
-					bgpLsAfFound = true
-				}
-			case *capUnknown:
-			}
-		}
-	}
-
-	if !bgpLsAfFound {
-		bgpLsCap := &capMultiproto{
-			afi:  BgpLsAfi,
-			safi: BgpLsSafi,
-		}
-		b, err := bgpLsCap.serialize()
-		if err != nil {
-			f.logger.WithField(loggerErrorField, err).Panic("error serializing bgp-ls multiprotocol capability")
-		}
-		return &errWithNotification{
-			error:   errors.New("bgp-ls capability not found"),
-			code:    NotifErrCodeOpenMessage,
-			subcode: NotifErrSubcodeUnsupportedCapability,
-			data:    b,
-		}
-	}
-
-	if fourOctetAS && !fourOctetAsFound {
-		return &errWithNotification{
-			error:   errors.New("4-octet AS indicated in as field but not found in capabilities"),
-			code:    NotifErrCodeOpenMessage,
-			subcode: NotifErrSubcodeBadPeerAS,
-		}
-	}
-
-	return nil
 }
 
 func (f *standardFSM) state() FSMState {
