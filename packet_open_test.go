@@ -9,6 +9,58 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func TestValidateOpenMessage(t *testing.T) {
+	// valid
+	o, err := newOpenMessage(1, time.Second*3, net.ParseIP("172.16.1.1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = validateOpenMessage(o, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// asn mimatch
+	err = validateOpenMessage(o, 2)
+	assert.NotNil(t, err)
+
+	// bad version
+	o.version = 2
+	err = validateOpenMessage(o, 1)
+	assert.NotNil(t, err)
+
+	// bad hold time
+	o, err = newOpenMessage(1, time.Second*2, net.ParseIP("172.16.1.1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = validateOpenMessage(o, 1)
+	assert.NotNil(t, err)
+
+	// bad bgp id
+	o, err = newOpenMessage(1, time.Second*3, []byte{0, 0, 0, 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = validateOpenMessage(o, 1)
+	assert.NotNil(t, err)
+
+	// bad opt params
+	o.holdTime = 3
+	o.bgpID = 1
+	o.optParams = nil
+	err = validateOpenMessage(o, 1)
+	assert.NotNil(t, err)
+
+	// test 4 octet asn
+	o, err = newOpenMessage(523456, time.Second*3, net.ParseIP("172.16.1.1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = validateOpenMessage(o, 523456)
+	assert.Nil(t, err)
+}
+
 func TestOpenMessage(t *testing.T) {
 	asn := uint16(64512)
 	holdTime := time.Second * 30
