@@ -64,6 +64,96 @@ func TestLinkAttrs(t *testing.T) {
 		&LinkAttrLinkProtectionType{
 			ExtraTraffic: true,
 		},
+		&LinkAttrPeerNodeSID{
+			BaseSID: BaseSID{
+				Value:  true,
+				Local:  true,
+				Weight: 1,
+				Variable: &SIDLabel{
+					Label: 50,
+				},
+			},
+		},
+		&LinkAttrPeerNodeSID{
+			BaseSID: BaseSID{
+				Value:  true,
+				Local:  true,
+				Weight: 1,
+				Variable: &SRGBOffset{
+					Offset: 50,
+				},
+			},
+		},
+		&LinkAttrPeerNodeSID{
+			BaseSID: BaseSID{
+				Value:  true,
+				Local:  true,
+				Weight: 1,
+				Variable: &IPv6SID{
+					Address: net.ParseIP("2601::"),
+				},
+			},
+		},
+		&LinkAttrPeerAdjSID{
+			BaseSID: BaseSID{
+				Value:  true,
+				Local:  true,
+				Weight: 1,
+				Variable: &SIDLabel{
+					Label: 50,
+				},
+			},
+		},
+		&LinkAttrPeerAdjSID{
+			BaseSID: BaseSID{
+				Value:  true,
+				Local:  true,
+				Weight: 1,
+				Variable: &SRGBOffset{
+					Offset: 50,
+				},
+			},
+		},
+		&LinkAttrPeerAdjSID{
+			BaseSID: BaseSID{
+				Value:  true,
+				Local:  true,
+				Weight: 1,
+				Variable: &IPv6SID{
+					Address: net.ParseIP("2601::"),
+				},
+			},
+		},
+		&LinkAttrPeerSetSID{
+			BaseSID: BaseSID{
+				Value:  true,
+				Local:  true,
+				Weight: 1,
+				Variable: &SIDLabel{
+					Label: 50,
+				},
+			},
+		},
+		&LinkAttrPeerSetSID{
+			BaseSID: BaseSID{
+				Value:  true,
+				Local:  true,
+				Weight: 1,
+				Variable: &SRGBOffset{
+					Offset: 50,
+				},
+			},
+		},
+		&LinkAttrPeerSetSID{
+			BaseSID: BaseSID{
+				Value:  true,
+				Local:  true,
+				Weight: 1,
+				Variable: &IPv6SID{
+					Address: net.ParseIP("2601::"),
+				},
+			},
+		},
 	}
 
 	for _, a := range attrs {
@@ -413,6 +503,96 @@ func TestUpdateMessage(t *testing.T) {
 				},
 				&LinkAttrLinkName{
 					Name: "test",
+				},
+				&LinkAttrPeerNodeSID{
+					BaseSID: BaseSID{
+						Value:  true,
+						Local:  true,
+						Weight: 1,
+						Variable: &SIDLabel{
+							Label: 50,
+						},
+					},
+				},
+				&LinkAttrPeerNodeSID{
+					BaseSID: BaseSID{
+						Value:  true,
+						Local:  true,
+						Weight: 1,
+						Variable: &SRGBOffset{
+							Offset: 50,
+						},
+					},
+				},
+				&LinkAttrPeerNodeSID{
+					BaseSID: BaseSID{
+						Value:  true,
+						Local:  true,
+						Weight: 1,
+						Variable: &IPv6SID{
+							Address: net.ParseIP("2601::"),
+						},
+					},
+				},
+				&LinkAttrPeerAdjSID{
+					BaseSID: BaseSID{
+						Value:  true,
+						Local:  true,
+						Weight: 1,
+						Variable: &SIDLabel{
+							Label: 50,
+						},
+					},
+				},
+				&LinkAttrPeerAdjSID{
+					BaseSID: BaseSID{
+						Value:  true,
+						Local:  true,
+						Weight: 1,
+						Variable: &SRGBOffset{
+							Offset: 50,
+						},
+					},
+				},
+				&LinkAttrPeerAdjSID{
+					BaseSID: BaseSID{
+						Value:  true,
+						Local:  true,
+						Weight: 1,
+						Variable: &IPv6SID{
+							Address: net.ParseIP("2601::"),
+						},
+					},
+				},
+				&LinkAttrPeerAdjSID{
+					BaseSID: BaseSID{
+						Value:  true,
+						Local:  true,
+						Weight: 1,
+						Variable: &SIDLabel{
+							Label: 50,
+						},
+					},
+				},
+				&LinkAttrPeerAdjSID{
+					BaseSID: BaseSID{
+						Value:  true,
+						Local:  true,
+						Weight: 1,
+						Variable: &SRGBOffset{
+							Offset: 50,
+						},
+					},
+				},
+				&LinkAttrPeerAdjSID{
+					BaseSID: BaseSID{
+						Value:  true,
+						Local:  true,
+						Weight: 1,
+						Variable: &IPv6SID{
+							Address: net.ParseIP("2601::"),
+						},
+					},
 				},
 			},
 			PrefixAttrs: []PrefixAttr{

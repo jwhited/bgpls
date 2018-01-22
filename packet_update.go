@@ -541,6 +541,27 @@ func (p *PathAttrLinkState) deserialize(f PathAttrFlags, b []byte) error {
 				return err
 			}
 			p.LinkAttrs = append(p.LinkAttrs, attr)
+		case uint16(LinkAttrCodePeerNodeSID):
+			attr := &LinkAttrPeerNodeSID{}
+			err := attr.deserialize(attrToDecode)
+			if err != nil {
+				return err
+			}
+			p.LinkAttrs = append(p.LinkAttrs, attr)
+		case uint16(LinkAttrCodePeerAdjSID):
+			attr := &LinkAttrPeerAdjSID{}
+			err := attr.deserialize(attrToDecode)
+			if err != nil {
+				return err
+			}
+			p.LinkAttrs = append(p.LinkAttrs, attr)
+		case uint16(LinkAttrCodePeerSetSID):
+			attr := &LinkAttrPeerSetSID{}
+			err := attr.deserialize(attrToDecode)
+			if err != nil {
+				return err
+			}
+			p.LinkAttrs = append(p.LinkAttrs, attr)
 		case uint16(PrefixAttrCodeIgpExtendedRouteTag):
 			attr := &PrefixAttrIgpExtendedRouteTag{}
 			err := attr.deserialize(attrToDecode)
@@ -999,6 +1020,9 @@ const (
 	LinkAttrCodeSharedRiskLinkGroup        LinkAttrCode = 1096
 	LinkAttrCodeOpaqueLinkAttr             LinkAttrCode = 1097
 	LinkAttrCodeLinkName                   LinkAttrCode = 1098
+	LinkAttrCodePeerNodeSID                LinkAttrCode = 1101
+	LinkAttrCodePeerAdjSID                 LinkAttrCode = 1102
+	LinkAttrCodePeerSetSID                 LinkAttrCode = 1103
 )
 
 // LinkAttrRemoteIPv4RouterID is a link attribute contained in a bgp-ls attribute.
@@ -1590,6 +1614,222 @@ func (l *LinkAttrLinkName) deserialize(b []byte) error {
 
 func (l *LinkAttrLinkName) serialize() ([]byte, error) {
 	return serializeBgpLsStringTLV(uint16(l.Code()), l.Name), nil
+}
+
+// BaseSID contains the fields shared between PeerNodeSID, PeerAdjSID, and PeerSetSID link attrs
+type BaseSID struct {
+	Value    bool
+	Local    bool
+	Weight   uint8
+	Variable BaseSIDVariable
+}
+
+// BaseSIDVariable is a variable field in every PeerNodeSID, PeerAdjSID, or PeerSetSID link attr
+type BaseSIDVariable interface {
+	Type() BaseSIDVariableType
+}
+
+// BaseSIDVariableType describes the type of variable field contained in every PeerNodeSID, PeerAdjSID, or PeerSetSID link attr
+type BaseSIDVariableType uint8
+
+// BaseSIDVariableType values
+const (
+	BaseSIDVariableTypeSIDLabel   BaseSIDVariableType = 3
+	BaseSIDVariableTypeSRGBOffset BaseSIDVariableType = 4
+	BaseSIDVariableTypeIPv6SID    BaseSIDVariableType = 16
+)
+
+// SIDLabel is an mpls label contained in a PeerNodeSID, PeerAdjSID, or PeerSetSID link attr
+type SIDLabel struct {
+	Label uint32
+}
+
+// Type returns the appropriate BaseSIDVariableType for SIDLabel
+func (l *SIDLabel) Type() BaseSIDVariableType {
+	return BaseSIDVariableTypeSIDLabel
+}
+
+// SRGBOffset is Segment Routing Global Block offset contaiend in a PeerNodeSID, PeerAdjSID, or PeerSetSID link attr
+type SRGBOffset struct {
+	Offset uint32
+}
+
+// Type returns the appropriate BaseSIDVariableType for SRGBOffset
+func (l *SRGBOffset) Type() BaseSIDVariableType {
+	return BaseSIDVariableTypeSRGBOffset
+}
+
+// IPv6SID is an IPv6 address contained in a PeerNodeSID, PeerAdjSID, or PeerSetSID link attr
+type IPv6SID struct {
+	Address net.IP
+}
+
+// Type returns the appropriate BaseSIDVariableType for IPv6SID
+func (l *IPv6SID) Type() BaseSIDVariableType {
+	return BaseSIDVariableTypeIPv6SID
+}
+
+func (s *BaseSID) deserialize(b []byte) error {
+	if len(b) != 7 && len(b) != 8 && len(b) != 20 {
+		return &errWithNotification{
+			error:   errors.New("SID TLV invalid length"),
+			code:    NotifErrCodeUpdateMessage,
+			subcode: NotifErrSubcodeMalformedAttr,
+		}
+	}
+
+	flags := b[0]
+	s.Value = (flags & 128) != 0
+	s.Local = (flags & 64) != 0
+	s.Weight = b[1]
+
+	switch len(b) {
+	case 7:
+		b = append([]byte{0}, b[4:]...)
+		label := &SIDLabel{
+			Label: binary.BigEndian.Uint32(b),
+		}
+		s.Variable = label
+	case 8:
+		b = b[4:]
+		offset := &SRGBOffset{
+			Offset: binary.BigEndian.Uint32(b),
+		}
+		s.Variable = offset
+	case 20:
+		b = b[4:]
+		addr, err := bytesToIPAddress(b)
+		if err != nil {
+			return &errWithNotification{
+				error:   fmt.Errorf("error deserializing v6 address in SID: %v", err),
+				code:    NotifErrCodeUpdateMessage,
+				subcode: NotifErrSubcodeMalformedAttr,
+			}
+		}
+		sid := &IPv6SID{
+			Address: addr,
+		}
+		s.Variable = sid
+	}
+
+	return nil
+}
+
+func (s *BaseSID) serialize() ([]byte, error) {
+	b := make([]byte, 4)
+	if s.Value {
+		b[0] += 128
+	}
+	if s.Local {
+		b[0] += 64
+	}
+	b[1] = s.Weight
+
+	switch v := s.Variable.(type) {
+	case *SIDLabel:
+		c := make([]byte, 4)
+		binary.BigEndian.PutUint32(c, v.Label)
+		c = c[1:]
+		b = append(b, c...)
+	case *SRGBOffset:
+		c := make([]byte, 4)
+		binary.BigEndian.PutUint32(c, v.Offset)
+		b = append(b, c...)
+	case *IPv6SID:
+		b = append(b, v.Address...)
+	}
+
+	return b, nil
+}
+
+// LinkAttrPeerNodeSID is a link attributed contained a bgp-ls attribute
+//
+// https://tools.ietf.org/html/draft-ietf-idr-bgpls-segment-routing-epe-14#section-4.4
+type LinkAttrPeerNodeSID struct {
+	BaseSID
+}
+
+// Code returns the appropriate LinkAttrCode for LinkAttrPeerNodeSID
+func (l *LinkAttrPeerNodeSID) Code() LinkAttrCode {
+	return LinkAttrCodePeerNodeSID
+}
+
+func (l *LinkAttrPeerNodeSID) deserialize(b []byte) error {
+	return l.BaseSID.deserialize(b)
+}
+
+func (l *LinkAttrPeerNodeSID) serialize() ([]byte, error) {
+	b, err := l.BaseSID.serialize()
+	if err != nil {
+		return nil, err
+	}
+
+	c := make([]byte, 4)
+	binary.BigEndian.PutUint16(c[:2], uint16(l.Code()))
+	binary.BigEndian.PutUint16(c[2:], uint16(len(b)))
+	c = append(c, b...)
+
+	return c, nil
+}
+
+// LinkAttrPeerAdjSID is a link attributed contained a bgp-ls attribute
+//
+// https://tools.ietf.org/html/draft-ietf-idr-bgpls-segment-routing-epe-14#section-4.4
+type LinkAttrPeerAdjSID struct {
+	BaseSID
+}
+
+// Code returns the appropriate LinkAttrCode for LinkAttrPeerAdjSID
+func (l *LinkAttrPeerAdjSID) Code() LinkAttrCode {
+	return LinkAttrCodePeerAdjSID
+}
+
+func (l *LinkAttrPeerAdjSID) deserialize(b []byte) error {
+	return l.BaseSID.deserialize(b)
+}
+
+func (l *LinkAttrPeerAdjSID) serialize() ([]byte, error) {
+	b, err := l.BaseSID.serialize()
+	if err != nil {
+		return nil, err
+	}
+
+	c := make([]byte, 4)
+	binary.BigEndian.PutUint16(c[:2], uint16(l.Code()))
+	binary.BigEndian.PutUint16(c[2:], uint16(len(b)))
+	c = append(c, b...)
+
+	return c, nil
+}
+
+// LinkAttrPeerSetSID is a link attributed contained a bgp-ls attribute
+//
+// https://tools.ietf.org/html/draft-ietf-idr-bgpls-segment-routing-epe-14#section-4.4
+type LinkAttrPeerSetSID struct {
+	BaseSID
+}
+
+// Code returns the appropriate LinkAttrCode for LinkAttrPeerSetSID
+func (l *LinkAttrPeerSetSID) Code() LinkAttrCode {
+	return LinkAttrCodePeerSetSID
+}
+
+func (l *LinkAttrPeerSetSID) deserialize(b []byte) error {
+	return l.BaseSID.deserialize(b)
+}
+
+func (l *LinkAttrPeerSetSID) serialize() ([]byte, error) {
+	b, err := l.BaseSID.serialize()
+	if err != nil {
+		return nil, err
+	}
+
+	c := make([]byte, 4)
+	binary.BigEndian.PutUint16(c[:2], uint16(l.Code()))
+	binary.BigEndian.PutUint16(c[2:], uint16(len(b)))
+	c = append(c, b...)
+
+	return c, nil
 }
 
 // PrefixAttr is a prefix attribute contained in a bgp-ls attribute.
