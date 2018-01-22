@@ -7,6 +7,199 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func TestPrefixAttrs(t *testing.T) {
+	attrs := []PrefixAttr{
+		&PrefixAttrIgpFlags{
+			IsIsDown: true,
+		},
+		&PrefixAttrIgpRouteTag{
+			Tags: []uint32{1, 2, 3},
+		},
+		&PrefixAttrIgpExtendedRouteTag{
+			Tags: []uint64{1, 2, 3},
+		},
+		&PrefixAttrPrefixMetric{
+			Metric: 1,
+		},
+		&PrefixAttrOspfForwardingAddress{
+			Address: net.ParseIP("1.1.1.1").To4(),
+		},
+	}
+
+	for _, a := range attrs {
+		b, err := a.serialize()
+		assert.Nil(t, err)
+		b = append(b, uint8(0))
+		err = a.deserialize(b)
+		assert.NotNil(t, err)
+	}
+}
+
+func TestLinkAttrs(t *testing.T) {
+	var adminGroup [32]bool
+	adminGroup[31] = true
+
+	attrs := []LinkAttr{
+		&LinkAttrRemoteIPv4RouterID{
+			Address: net.ParseIP("1.1.1.1").To4(),
+		},
+		&LinkAttrRemoteIPv6RouterID{
+			Address: net.ParseIP("2601::").To16(),
+		},
+		&LinkAttrAdminGroup{
+			Group: adminGroup,
+		},
+		&LinkAttrMaxLinkBandwidth{
+			BytesPerSecond: 10000.00,
+		},
+		&LinkAttrMaxReservableLinkBandwidth{
+			BytesPerSecond: 20000.00,
+		},
+		&LinkAttrUnreservedBandwidth{
+			BytesPerSecond: [8]float32{0, 0, 1000.00, 0, 0, 0, 0, 0},
+		},
+		&LinkAttrTEDefaultMetric{
+			Metric: uint32(5),
+		},
+		&LinkAttrLinkProtectionType{
+			ExtraTraffic: true,
+		},
+	}
+
+	for _, a := range attrs {
+		b, err := a.serialize()
+		assert.Nil(t, err)
+		b = append(b, uint8(0))
+		err = a.deserialize(b)
+		assert.NotNil(t, err)
+	}
+}
+
+func TestNodeAttrs(t *testing.T) {
+	attrs := []NodeAttr{
+		&NodeAttrMultiTopologyID{
+			IDs: []uint16{1, 2, 3},
+		},
+		&NodeAttrNodeFlagBits{
+			Overload: true,
+		},
+		&NodeAttrIsIsAreaID{
+			AreaID: uint32(1),
+		},
+		&NodeAttrLocalIPv4RouterID{
+			Address: net.ParseIP("1.1.1.1").To4(),
+		},
+		&NodeAttrLocalIPv6RouterID{
+			Address: net.ParseIP("2601::").To16(),
+		},
+	}
+
+	for _, a := range attrs {
+		b, err := a.serialize()
+		assert.Nil(t, err)
+		b = append(b, uint8(0))
+		err = a.deserialize(b)
+		assert.NotNil(t, err)
+	}
+}
+
+func TestPrefixDescriptors(t *testing.T) {
+	descriptors := []PrefixDescriptor{
+		&PrefixDescriptorIPReachabilityInfo{
+			PrefixLength: uint8(32),
+			Prefix:       net.ParseIP("1.2.3.4").To4(),
+		},
+		&PrefixDescriptorMultiTopologyID{
+			IDs: []uint16{0, 1, 2},
+		},
+		&PrefixDescriptorOspfRouteType{
+			RouteType: OspfRouteTypeExternal1,
+		},
+	}
+
+	for _, d := range descriptors {
+		b, err := d.serialize()
+		assert.Nil(t, err)
+		b = append(b, uint8(0))
+		err = d.deserialize(b)
+		assert.NotNil(t, err)
+	}
+}
+
+func TestLinkDescriptors(t *testing.T) {
+	descriptors := []LinkDescriptor{
+		&LinkDescriptorLinkIDs{
+			LocalID:  uint32(2),
+			RemoteID: uint32(3),
+		},
+		&LinkDescriptorIPv4InterfaceAddress{
+			Address: net.ParseIP("1.1.1.1").To4(),
+		},
+		&LinkDescriptorIPv4NeighborAddress{
+			Address: net.ParseIP("2.2.2.2").To4(),
+		},
+		&LinkDescriptorIPv6InterfaceAddress{
+			Address: net.ParseIP("2601::").To16(),
+		},
+		&LinkDescriptorIPv6NeighborAddress{
+			Address: net.ParseIP("2601::").To16(),
+		},
+		&LinkDescriptorMultiTopologyID{
+			IDs: []uint16{0, 1, 2},
+		},
+	}
+
+	for _, d := range descriptors {
+		b, err := d.serialize()
+		assert.Nil(t, err)
+		b = append(b, uint8(0))
+		err = d.deserialize(b)
+		assert.NotNil(t, err)
+	}
+}
+
+func TestNodeDescriptors(t *testing.T) {
+	descriptors := []NodeDescriptor{
+		&NodeDescriptorASN{
+			ASN: uint32(64512),
+		},
+		&NodeDescriptorBgpLsID{
+			ID: uint32(1),
+		},
+		&NodeDescriptorOspfAreaID{
+			ID: uint32(1),
+		},
+		&NodeDescriptorIgpRouterIDIsIsNonPseudo{
+			IsoNodeID: uint64(1),
+		},
+		&NodeDescriptorIgpRouterIDIsIsPseudo{
+			IsoNodeID: uint64(1),
+			PsnID:     uint8(1),
+		},
+		&NodeDescriptorIgpRouterIDOspfNonPseudo{
+			RouterID: net.ParseIP("1.1.1.1").To4(),
+		},
+		&NodeDescriptorIgpRouterIDOspfPseudo{
+			DrRouterID:       net.ParseIP("1.1.1.1").To4(),
+			DrInterfaceToLAN: net.ParseIP("2.2.2.2").To4(),
+		},
+		&NodeDescriptorBgpRouterID{
+			RouterID: net.ParseIP("1.1.1.1").To4(),
+		},
+		&NodeDescriptorMemberASN{
+			ASN: uint32(64512),
+		},
+	}
+
+	for _, d := range descriptors {
+		b, err := d.serialize()
+		assert.Nil(t, err)
+		b = append(b, uint8(0))
+		err = d.deserialize(b)
+		assert.NotNil(t, err)
+	}
+}
+
 func TestUpdateMessage(t *testing.T) {
 	var adminGroup [32]bool
 	adminGroup[31] = true
@@ -14,6 +207,19 @@ func TestUpdateMessage(t *testing.T) {
 	unreservedBW[0] = 10000
 
 	attrs := []PathAttr{
+		&PathAttrMpUnreach{
+			Nlri: []LinkStateNlri{
+				&LinkStateNlriNode{
+					ProtocolID: LinkStateNlriOSPFv2ProtocolID,
+					ID:         uint64(56),
+					LocalNodeDescriptors: []NodeDescriptor{
+						&NodeDescriptorASN{
+							ASN: uint32(64512),
+						},
+					},
+				},
+			},
+		},
 		&PathAttrMpReach{
 			Nlri: []LinkStateNlri{
 				&LinkStateNlriNode{
@@ -35,6 +241,12 @@ func TestUpdateMessage(t *testing.T) {
 						&NodeDescriptorIgpRouterIDIsIsPseudo{
 							IsoNodeID: uint64(3),
 							PsnID:     uint8(4),
+						},
+						&NodeDescriptorBgpRouterID{
+							RouterID: net.ParseIP("172.16.1.1").To4(),
+						},
+						&NodeDescriptorMemberASN{
+							ASN: uint32(64512),
 						},
 					},
 				},
