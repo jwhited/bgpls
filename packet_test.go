@@ -75,4 +75,15 @@ func TestMessageFromBytes(t *testing.T) {
 	b[18] = 5
 	_, err = messagesFromBytes(b)
 	assert.NotNil(t, err)
+
+	// 2 messages
+	k = &keepAliveMessage{}
+	b, err = k.serialize()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b = append(b, b...)
+	m, err := messagesFromBytes(b)
+	assert.Len(t, m, 2)
+	assert.Nil(t, err)
 }
