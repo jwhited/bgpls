@@ -69,7 +69,7 @@ func messagesFromBytes(b []byte) ([]Message, error) {
 		}
 
 		msgLen := binary.BigEndian.Uint16(b[16:18])
-		if len(b) < int(msgLen) {
+		if len(b) < int(msgLen) || msgLen < 19 {
 			return nil, &errWithNotification{
 				error:   errors.New("message header length invalid"),
 				code:    NotifErrCodeMessageHeader,

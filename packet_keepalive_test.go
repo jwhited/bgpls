@@ -20,7 +20,7 @@ func TestKeepaliveMessage(t *testing.T) {
 	}
 
 	if len(m) != 1 {
-		t.Errorf("invalid number of messages deserialized: %d", len(m))
+		t.Fatalf("invalid number of messages deserialized: %d", len(m))
 	}
 
 	f, ok := m[0].(*keepAliveMessage)

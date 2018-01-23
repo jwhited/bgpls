@@ -1,5 +1,7 @@
 package bgpls
 
+import "errors"
+
 type keepAliveMessage struct{}
 
 func (k *keepAliveMessage) MessageType() MessageType {
@@ -12,5 +14,12 @@ func (k *keepAliveMessage) serialize() ([]byte, error) {
 }
 
 func (k *keepAliveMessage) deserialize(b []byte) error {
+	if len(b) > 0 {
+		return &errWithNotification{
+			error:   errors.New("keep alive message invalid length"),
+			code:    NotifErrCodeMessageHeader,
+			subcode: NotifErrSubcodeBadLength,
+		}
+	}
 	return nil
 }
