@@ -9,6 +9,58 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func TestCapOptParam(t *testing.T) {
+	c := &capabilityOptParam{}
+	assert.Equal(t, c.optParamType(), capabilityOptParamType)
+
+	// empty caps
+	_, err := c.serialize()
+	assert.NotNil(t, err)
+
+	// error serializing cap
+
+	// len < 2 deserializing
+	err = c.deserialize([]byte{0})
+	assert.NotNil(t, err)
+
+	// invalid param len
+	err = c.deserialize([]byte{0, 2, 0})
+	assert.NotNil(t, err)
+
+	// deserialize capUnknown
+	u := &capUnknown{code: 100}
+	b, err := u.serialize()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = c.deserialize(b)
+	assert.Nil(t, err)
+}
+
+func TestCapUnknown(t *testing.T) {
+	c := &capUnknown{}
+	err := c.deserialize([]byte{0, 0, 0})
+	assert.Nil(t, err)
+	_, err = c.serialize()
+	assert.Nil(t, err)
+	assert.Equal(t, c.capabilityCode(), capabilityCode(0))
+}
+
+func TestCapMultiproto(t *testing.T) {
+	c := &capMultiproto{}
+	err := c.deserialize([]byte{0})
+	assert.NotNil(t, err)
+	assert.Equal(t, c.capabilityCode(), capCodeMultiproto)
+}
+
+func TestCapFourOctetAs(t *testing.T) {
+	c := &capFourOctetAs{}
+	err := c.deserialize([]byte{0})
+	assert.NotNil(t, err)
+	assert.Equal(t, c.capabilityCode(), capCodeFourOctetAs)
+}
+
 func TestValidateOpenMessage(t *testing.T) {
 	// valid
 	o, err := newOpenMessage(1, time.Second*3, net.ParseIP("172.16.1.1"))
@@ -59,6 +111,45 @@ func TestValidateOpenMessage(t *testing.T) {
 	}
 	err = validateOpenMessage(o, 523456)
 	assert.Nil(t, err)
+
+	// 4 octet indicated but not found in cap
+	o, err = newOpenMessage(uint32(asTrans), time.Second*3, net.ParseIP("172.16.1.1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	o.optParams = []optParam{
+		&capabilityOptParam{
+			caps: []capability{
+				&capMultiproto{
+					afi:  BgpLsAfi,
+					safi: BgpLsSafi,
+				},
+			},
+		},
+	}
+	err = validateOpenMessage(o, 5)
+	assert.NotNil(t, err)
+
+	// bad peer asn in 4 octet cap
+	o, err = newOpenMessage(uint32(asTrans), time.Second*3, net.ParseIP("172.16.1.1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	o.optParams = []optParam{
+		&capabilityOptParam{
+			caps: []capability{
+				&capFourOctetAs{
+					asn: 6,
+				},
+				&capMultiproto{
+					afi:  BgpLsAfi,
+					safi: BgpLsSafi,
+				},
+			},
+		},
+	}
+	err = validateOpenMessage(o, 5)
+	assert.NotNil(t, err)
 }
 
 func TestOpenMessage(t *testing.T) {
