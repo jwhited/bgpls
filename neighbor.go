@@ -22,14 +22,14 @@ type standardNeighbor struct {
 	c *NeighborConfig
 }
 
-func newNeighbor(localASN uint32, config *NeighborConfig, events chan Event) (neighbor, error) {
+func newNeighbor(localASN uint32, config *NeighborConfig, events chan Event) neighbor {
 	n := &standardNeighbor{
 		c: config,
 	}
 
 	n.fsm = newFSM(n.config(), events, localASN, 179)
 
-	return n, nil
+	return n
 }
 
 func (n *standardNeighbor) config() *NeighborConfig {

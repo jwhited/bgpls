@@ -95,11 +95,7 @@ func (c *standardCollector) AddNeighbor(config *NeighborConfig) error {
 		return errors.New("neighbor exists")
 	}
 
-	n, err := newNeighbor(c.config.ASN, config, c.events)
-	if err != nil {
-		return err
-	}
-
+	n := newNeighbor(c.config.ASN, config, c.events)
 	c.neighbors[config.Address.String()] = n
 
 	event := newEventNeighborAdded(config)

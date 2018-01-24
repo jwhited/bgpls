@@ -68,5 +68,17 @@ func TestCollector(t *testing.T) {
 	_, err = c.Neighbors()
 	assert.Equal(t, err, ErrCollectorStopped)
 
+	err = c.DeleteNeighbor(net.ParseIP("127.0.0.2"))
+	assert.Equal(t, err, ErrCollectorStopped)
+
+	c, err = NewCollector(collectorConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = c.AddNeighbor(neighborConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Stop()
 	c.Stop()
 }
