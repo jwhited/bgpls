@@ -195,7 +195,7 @@ type EventNeighborNotificationReceived struct {
 
 // Type returns the appropriate EventType for EventNeighborNotificationReceived
 func (e *EventNeighborNotificationReceived) Type() EventType {
-	return EventTypeNeighborUpdateReceived
+	return EventTypeNeighborNotificationReceived
 }
 
 func newEventNeighborNotificationReceived(c *NeighborConfig, n *NotificationMessage) Event {
