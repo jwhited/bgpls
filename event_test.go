@@ -36,4 +36,7 @@ func TestEvent(t *testing.T) {
 		_ = c.event.Neighbor()
 		_ = c.event.Timestamp()
 	}
+
+	u := EventType(0)
+	assert.Equal(t, u.String(), "unknown event type")
 }
