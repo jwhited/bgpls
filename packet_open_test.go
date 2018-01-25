@@ -2,12 +2,50 @@ package bgpls
 
 import (
 	"encoding/binary"
+	"math"
 	"net"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 )
+
+type fakeOptParam struct{}
+
+func (f *fakeOptParam) optParamType() optParamType {
+	return optParamType(0)
+}
+func (f *fakeOptParam) serialize() ([]byte, error) {
+	return nil, nil
+}
+func (f *fakeOptParam) deserialize(b []byte) error {
+	return nil
+}
+
+func TestDeserializeOptParams(t *testing.T) {
+	c := &capabilityOptParam{
+		caps: []capability{
+			&capFourOctetAs{
+				asn: 1,
+			},
+		},
+	}
+	b, err := c.serialize()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// error on cap deserialization
+	b = b[:len(b)-1]
+	b[1] = uint8(b[1] - 1)
+	_, err = deserializeOptParams(b)
+	assert.NotNil(t, err)
+
+	// invalid param len
+	b[1] = uint8(math.MaxUint8)
+	_, err = deserializeOptParams(b)
+	assert.NotNil(t, err)
+}
 
 func TestCapOptParam(t *testing.T) {
 	c := &capabilityOptParam{}
@@ -89,6 +127,15 @@ func TestValidateOpenMessage(t *testing.T) {
 	err = validateOpenMessage(o, 1)
 	assert.NotNil(t, err)
 
+	// non-cap opt param
+	o, err = newOpenMessage(1, time.Second*3, net.ParseIP("172.16.1.1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	o.optParams = []optParam{&fakeOptParam{}}
+	err = validateOpenMessage(o, 1)
+	assert.NotNil(t, err)
+
 	// bad bgp id
 	o, err = newOpenMessage(1, time.Second*3, []byte{0, 0, 0, 0})
 	if err != nil {
@@ -157,12 +204,42 @@ func TestOpenMessage(t *testing.T) {
 	holdTime := time.Second * 30
 	bgpID := net.ParseIP("172.16.0.1")
 
-	o, err := newOpenMessage(uint32(asn), holdTime, bgpID)
+	// invalid bgp id
+	_, err := newOpenMessage(uint32(asn), holdTime, []byte{0})
+	assert.NotNil(t, err)
+
+	// invalid opt params
+	o := &openMessage{
+		optParams: []optParam{
+			&capabilityOptParam{},
+		},
+	}
+	_, err = o.serialize()
+	assert.NotNil(t, err)
+
+	// invalid length
+	err = o.deserialize([]byte{0})
+	assert.NotNil(t, err)
+
+	// invald opt params len
+	o, err = newOpenMessage(uint32(asn), holdTime, bgpID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := o.serialize()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b[9] = uint8(1)
+	err = o.deserialize(b)
+	assert.NotNil(t, err)
+
+	o, err = newOpenMessage(uint32(asn), holdTime, bgpID)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	b, err := o.serialize()
+	b, err = o.serialize()
 	if err != nil {
 		t.Fatal(err)
 	}
