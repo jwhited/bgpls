@@ -1,11 +1,86 @@
 package bgpls
 
 import (
+	"encoding/binary"
+	"log"
 	"net"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
+
+func TestDeserializePathAttrs(t *testing.T) {
+	// bytes < attrLen
+	b := make([]byte, 4)
+	b[2] = uint8(100)
+	_, err := deserializePathAttrs(b)
+	assert.NotNil(t, err)
+
+	// origin errors
+	o := &PathAttrOrigin{
+		Origin: OriginCodeEGP,
+	}
+	b, err = o.serialize()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// bad origin code
+	b[3] = 3
+	_, err = deserializePathAttrs(b)
+	assert.NotNil(t, err)
+	// set to valid origin code
+	b[3] = 2
+	// set flags to invalid value
+	b[0] = 0
+	_, err = deserializePathAttrs(b)
+	assert.NotNil(t, err)
+
+	// as path errors
+	asp := &PathAttrAsPath{}
+	b, err = asp.serialize()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// set flags to invalid value
+	b[0] = 0
+	_, err = deserializePathAttrs(b)
+	assert.NotNil(t, err)
+}
+
+func TestUpdateSerialization(t *testing.T) {
+	// path attr serialization error
+	u := &UpdateMessage{
+		PathAttrs: []PathAttr{
+			&PathAttrOrigin{
+				Origin: OriginCode(3),
+			},
+		},
+	}
+	_, err := u.serialize()
+	assert.NotNil(t, err)
+
+	// len < 4
+	err = u.deserialize([]byte{0})
+	assert.NotNil(t, err)
+
+	// withdrawn routes invalid len
+	u = &UpdateMessage{}
+	b, err := u.serialize()
+	if err != nil {
+		t.Fatal(err)
+	}
+	binary.BigEndian.PutUint16(b[0:2], uint16(100))
+	err = u.deserialize(b)
+	log.Println(err)
+	assert.NotNil(t, err)
+
+	// path attr invalid len
+	binary.BigEndian.PutUint16(b[0:2], uint16(0))
+	binary.BigEndian.PutUint16(b[2:4], uint16(200))
+	err = u.deserialize(b)
+	log.Println(err)
+	assert.NotNil(t, err)
+}
 
 func TestPrefixAttrs(t *testing.T) {
 	attrs := []PrefixAttr{
@@ -624,6 +699,8 @@ func TestUpdateMessage(t *testing.T) {
 	u := &UpdateMessage{
 		PathAttrs: attrs,
 	}
+
+	assert.Equal(t, u.MessageType(), UpdateMessageType)
 
 	b, err := u.serialize()
 	if err != nil {
