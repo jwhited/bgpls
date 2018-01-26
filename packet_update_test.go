@@ -2,12 +2,87 @@ package bgpls
 
 import (
 	"encoding/binary"
-	"log"
 	"net"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
+
+func TestPathAttrFlags(t *testing.T) {
+	cases := []struct {
+		f   PathAttrFlags
+		val uint8
+	}{
+		{
+			PathAttrFlags{
+				Optional: true,
+			},
+			128,
+		},
+		{
+			PathAttrFlags{
+				Transitive: true,
+			},
+			64,
+		},
+		{
+			PathAttrFlags{
+				Partial: true,
+			},
+			32,
+		},
+		{
+			PathAttrFlags{
+				ExtendedLength: true,
+			},
+			16,
+		},
+	}
+
+	for _, c := range cases {
+		f := pathAttrFlagsFromByte(c.val)
+		assert.Equal(t, f, c.f)
+		b := c.f.serialize()
+		assert.Equal(t, b, c.val)
+	}
+}
+
+func TestValidatePathAttrFlags(t *testing.T) {
+	cases := []struct {
+		f   PathAttrFlags
+		cat pathAttrCategory
+		err bool
+	}{
+		{PathAttrFlags{
+			Transitive: true,
+		},
+			pathAttrCatWellKnownMandatory,
+			false,
+		},
+		{
+			PathAttrFlags{},
+			pathAttrCatWellKnownDiscretionary,
+			false,
+		},
+		{
+			PathAttrFlags{
+				Optional:   true,
+				Transitive: true,
+			},
+			pathAttrCatOptionalTransitive,
+			false,
+		},
+	}
+
+	for _, c := range cases {
+		err := validatePathAttrFlags(c.f, c.cat)
+		if c.err {
+			assert.NotNil(t, err)
+		} else {
+			assert.Nil(t, err)
+		}
+	}
+}
 
 func TestDeserializePathAttrs(t *testing.T) {
 	// bytes < attrLen
@@ -35,13 +110,63 @@ func TestDeserializePathAttrs(t *testing.T) {
 	_, err = deserializePathAttrs(b)
 	assert.NotNil(t, err)
 
-	// as path errors
-	asp := &PathAttrAsPath{}
-	b, err = asp.serialize()
+	cases := []struct {
+		a             PathAttr
+		invalidFlags  uint8
+		bytesToRemove int
+	}{
+		{
+			&PathAttrAsPath{
+				Segments: []AsPathSegment{
+					&AsPathSegmentSequence{
+						Sequence: []uint16{1},
+					},
+				},
+			},
+			0, 1,
+		},
+		{
+			&PathAttrLocalPref{
+				Preference: 100,
+			},
+			128, 1,
+		},
+		{
+			&PathAttrMpReach{},
+			0,
+			3,
+		},
+		{
+			&PathAttrMpUnreach{},
+			0,
+			3,
+		},
+	}
+
+	for _, c := range cases {
+		b, err = c.a.serialize()
+		if err != nil {
+			t.Fatal(err)
+		}
+		b = b[:len(b)-c.bytesToRemove]
+		b[2] = uint8(len(b) - 3)
+		_, err = deserializePathAttrs(b)
+		assert.NotNil(t, err)
+		b[0] = c.invalidFlags
+		_, err = deserializePathAttrs(b)
+		assert.NotNil(t, err)
+	}
+
+	// link state errors
+	ls := &PathAttrLinkState{}
+	b, err = ls.serialize()
 	if err != nil {
 		t.Fatal(err)
 	}
-	// set flags to invalid value
+	b = append(b, 0)
+	b[2] = 1
+	_, err = deserializePathAttrs(b)
+	assert.NotNil(t, err)
 	b[0] = 0
 	_, err = deserializePathAttrs(b)
 	assert.NotNil(t, err)
@@ -71,14 +196,12 @@ func TestUpdateSerialization(t *testing.T) {
 	}
 	binary.BigEndian.PutUint16(b[0:2], uint16(100))
 	err = u.deserialize(b)
-	log.Println(err)
 	assert.NotNil(t, err)
 
 	// path attr invalid len
 	binary.BigEndian.PutUint16(b[0:2], uint16(0))
 	binary.BigEndian.PutUint16(b[2:4], uint16(200))
 	err = u.deserialize(b)
-	log.Println(err)
 	assert.NotNil(t, err)
 }
 
