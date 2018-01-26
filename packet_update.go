@@ -314,7 +314,7 @@ type PathAttrFlags struct {
 	ExtendedLength bool
 }
 
-func (f *PathAttrFlags) serialize() (byte, error) {
+func (f *PathAttrFlags) serialize() byte {
 	var val uint8
 	if f.Optional {
 		val += 128
@@ -328,7 +328,7 @@ func (f *PathAttrFlags) serialize() (byte, error) {
 	if f.ExtendedLength {
 		val += 16
 	}
-	return val, nil
+	return val
 }
 
 // PathAttr is a bgp path attribute.
@@ -660,10 +660,7 @@ func (p *PathAttrLinkState) serialize() ([]byte, error) {
 	if len(nodeAttrs) > math.MaxUint8 {
 		p.f.ExtendedLength = true
 	}
-	flags, err := p.f.serialize()
-	if err != nil {
-		return nil, err
-	}
+	flags := p.f.serialize()
 
 	b := make([]byte, 2)
 	b[0] = flags
@@ -2264,10 +2261,7 @@ func (p *PathAttrMpReach) serialize() ([]byte, error) {
 	if len(b) > math.MaxUint8 {
 		p.f.ExtendedLength = true
 	}
-	flags, err := p.f.serialize()
-	if err != nil {
-		return nil, err
-	}
+	flags := p.f.serialize()
 
 	c := make([]byte, 2)
 	c[0] = flags
@@ -2366,10 +2360,7 @@ func (p *PathAttrMpUnreach) serialize() ([]byte, error) {
 	if len(b) > math.MaxUint8 {
 		p.f.ExtendedLength = true
 	}
-	flags, err := p.f.serialize()
-	if err != nil {
-		return nil, err
-	}
+	flags := p.f.serialize()
 
 	c := make([]byte, 2)
 	c[0] = flags
@@ -3931,15 +3922,15 @@ func (o *PathAttrOrigin) Type() PathAttrType {
 }
 
 func (o *PathAttrOrigin) serialize() ([]byte, error) {
+	if o.Origin > 2 {
+		return nil, errors.New("invalid origin code value")
+	}
+
 	o.f = PathAttrFlags{
 		Transitive: true,
 	}
 
-	flags, err := o.f.serialize()
-	if err != nil {
-		return nil, err
-	}
-
+	flags := o.f.serialize()
 	return []byte{flags, byte(PathAttrOriginType), byte(1), byte(o.Origin)}, nil
 }
 
@@ -3953,7 +3944,7 @@ func (o *PathAttrOrigin) deserialize(flags PathAttrFlags, b []byte) error {
 	}
 
 	o.f = flags
-	if b[0] >= 0 && b[0] <= 3 {
+	if b[0] >= 0 && b[0] < 3 {
 		o.Origin = OriginCode(b[0])
 	} else {
 		return &errWithNotification{
@@ -4129,11 +4120,7 @@ func (a *PathAttrAsPath) serialize() ([]byte, error) {
 	if len(segments) > math.MaxUint8 {
 		a.f.ExtendedLength = true
 	}
-	flags, err := a.f.serialize()
-	if err != nil {
-		return nil, err
-	}
-
+	flags := a.f.serialize()
 	b := make([]byte, 2)
 	b[0] = flags
 	b[1] = byte(PathAttrAsPathType)
@@ -4235,11 +4222,7 @@ func (p *PathAttrLocalPref) serialize() ([]byte, error) {
 		Transitive: true,
 	}
 
-	flags, err := p.f.serialize()
-	if err != nil {
-		return nil, err
-	}
-
+	flags := p.f.serialize()
 	b := make([]byte, 7)
 	b[0] = flags
 	b[1] = byte(PathAttrLocalPrefType)
