@@ -2,12 +2,253 @@ package bgpls
 
 import (
 	"encoding/binary"
-	"log"
 	"net"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
+
+func TestPathAttrLinkState(t *testing.T) {
+	ls := &PathAttrLinkState{}
+	assert.Equal(t, ls.Flags(), PathAttrFlags{})
+	assert.Equal(t, ls.Type(), PathAttrLinkStateType)
+	err := ls.deserialize(PathAttrFlags{}, []byte{})
+	assert.Nil(t, err)
+
+	// 0 > len < 4
+	err = ls.deserialize(PathAttrFlags{}, []byte{0})
+	assert.NotNil(t, err)
+
+	// invalid attr len
+	err = ls.deserialize(PathAttrFlags{}, []byte{0, 0, 0, 100, 0})
+	assert.NotNil(t, err)
+
+	// err on attr deserialization
+	cases := []struct {
+		a uint16
+		b []byte
+	}{
+		{
+			uint16(NodeAttrCodeIsIsAreaID),
+			[]byte{0},
+		},
+		{
+			uint16(NodeAttrCodeLocalIPv4RouterID),
+			[]byte{0},
+		},
+		{
+			uint16(NodeAttrCodeLocalIPv6RouterID),
+			[]byte{0},
+		},
+		{
+			uint16(NodeAttrCodeMultiTopologyID),
+			[]byte{0},
+		},
+		{
+			uint16(NodeAttrCodeNodeFlagBits),
+			[]byte{0, 0},
+		},
+		{
+			uint16(LinkAttrCodeAdminGroup),
+			[]byte{0, 0},
+		},
+		{
+			uint16(LinkAttrCodeIgpMetric),
+			[]byte{0, 0, 0, 0},
+		},
+		{
+			uint16(LinkAttrCodeLinkProtectionType),
+			[]byte{0, 0, 0, 0},
+		},
+		{
+			uint16(LinkAttrCodeMaxLinkBandwidth),
+			[]byte{0, 0, 0},
+		},
+		{
+			uint16(LinkAttrCodeMaxReservableLinkBandwidth),
+			[]byte{0, 0, 0},
+		},
+		{
+			uint16(LinkAttrCodeMplsProtocolMask),
+			[]byte{0, 0, 0},
+		},
+		{
+			uint16(LinkAttrCodeRemoteIPv4RouterID),
+			[]byte{0, 0, 0},
+		},
+		{
+			uint16(LinkAttrCodeRemoteIPv6RouterID),
+			[]byte{0, 0, 0},
+		},
+		{
+			uint16(LinkAttrCodeSharedRiskLinkGroup),
+			[]byte{0, 0, 0},
+		},
+		{
+			uint16(LinkAttrCodeTEDefaultMetric),
+			[]byte{0, 0, 0},
+		},
+		{
+			uint16(LinkAttrCodeUnreservedBandwidth),
+			[]byte{0, 0, 0},
+		},
+		{
+			uint16(LinkAttrCodePeerNodeSID),
+			[]byte{0, 0, 0},
+		},
+		{
+			uint16(LinkAttrCodePeerAdjSID),
+			[]byte{0, 0, 0},
+		},
+		{
+			uint16(LinkAttrCodePeerSetSID),
+			[]byte{0, 0, 0},
+		},
+		{
+			uint16(PrefixAttrCodeIgpExtendedRouteTag),
+			[]byte{0, 0, 0},
+		},
+		{
+			uint16(PrefixAttrCodeIgpFlags),
+			[]byte{0, 0, 0},
+		},
+		{
+			uint16(PrefixAttrCodeIgpRouteTag),
+			[]byte{0, 0, 0},
+		},
+		{
+			uint16(PrefixAttrCodeOspfForwardingAddress),
+			[]byte{0, 0, 0},
+		},
+		{
+			uint16(PrefixAttrCodePrefixMetric),
+			[]byte{0, 0, 0},
+		},
+		{
+			uint16(0),
+			[]byte{0, 0, 0},
+		},
+	}
+
+	for _, c := range cases {
+		b := make([]byte, 4)
+		binary.BigEndian.PutUint16(b[:2], uint16(c.a))
+		binary.BigEndian.PutUint16(b[2:], uint16(len(c.b)))
+		b = append(b, c.b...)
+		err = ls.deserialize(PathAttrFlags{}, b)
+		assert.NotNil(t, err)
+	}
+
+	// node attrs err on serialization
+	ls = &PathAttrLinkState{
+		NodeAttrs: []NodeAttr{
+			&NodeAttrLocalIPv4RouterID{
+				Address: []byte{0},
+			},
+		},
+	}
+	_, err = ls.serialize()
+	assert.NotNil(t, err)
+
+	// link attrs err on serialization
+	ls = &PathAttrLinkState{
+		LinkAttrs: []LinkAttr{
+			&LinkAttrRemoteIPv4RouterID{
+				Address: []byte{0},
+			},
+		},
+	}
+	_, err = ls.serialize()
+	assert.NotNil(t, err)
+
+	// prefix attrs err on serialization
+	ls = &PathAttrLinkState{
+		PrefixAttrs: []PrefixAttr{
+			&PrefixAttrOspfForwardingAddress{
+				Address: []byte{0},
+			},
+		},
+	}
+	_, err = ls.serialize()
+	assert.NotNil(t, err)
+}
+
+func TestPathAttrFlags(t *testing.T) {
+	cases := []struct {
+		f   PathAttrFlags
+		val uint8
+	}{
+		{
+			PathAttrFlags{
+				Optional: true,
+			},
+			128,
+		},
+		{
+			PathAttrFlags{
+				Transitive: true,
+			},
+			64,
+		},
+		{
+			PathAttrFlags{
+				Partial: true,
+			},
+			32,
+		},
+		{
+			PathAttrFlags{
+				ExtendedLength: true,
+			},
+			16,
+		},
+	}
+
+	for _, c := range cases {
+		f := pathAttrFlagsFromByte(c.val)
+		assert.Equal(t, f, c.f)
+		b := c.f.serialize()
+		assert.Equal(t, b, c.val)
+	}
+}
+
+func TestValidatePathAttrFlags(t *testing.T) {
+	cases := []struct {
+		f   PathAttrFlags
+		cat pathAttrCategory
+		err bool
+	}{
+		{
+			PathAttrFlags{
+				Transitive: true,
+			},
+			pathAttrCatWellKnownMandatory,
+			false,
+		},
+		{
+			PathAttrFlags{},
+			pathAttrCatWellKnownDiscretionary,
+			false,
+		},
+		{
+			PathAttrFlags{
+				Optional:   true,
+				Transitive: true,
+			},
+			pathAttrCatOptionalTransitive,
+			false,
+		},
+	}
+
+	for _, c := range cases {
+		err := validatePathAttrFlags(c.f, c.cat)
+		if c.err {
+			assert.NotNil(t, err)
+		} else {
+			assert.Nil(t, err)
+		}
+	}
+}
 
 func TestDeserializePathAttrs(t *testing.T) {
 	// bytes < attrLen
@@ -35,13 +276,63 @@ func TestDeserializePathAttrs(t *testing.T) {
 	_, err = deserializePathAttrs(b)
 	assert.NotNil(t, err)
 
-	// as path errors
-	asp := &PathAttrAsPath{}
-	b, err = asp.serialize()
+	cases := []struct {
+		a             PathAttr
+		invalidFlags  uint8
+		bytesToRemove int
+	}{
+		{
+			&PathAttrAsPath{
+				Segments: []AsPathSegment{
+					&AsPathSegmentSequence{
+						Sequence: []uint16{1},
+					},
+				},
+			},
+			0, 1,
+		},
+		{
+			&PathAttrLocalPref{
+				Preference: 100,
+			},
+			128, 1,
+		},
+		{
+			&PathAttrMpReach{},
+			0,
+			3,
+		},
+		{
+			&PathAttrMpUnreach{},
+			0,
+			3,
+		},
+	}
+
+	for _, c := range cases {
+		b, err = c.a.serialize()
+		if err != nil {
+			t.Fatal(err)
+		}
+		b = b[:len(b)-c.bytesToRemove]
+		b[2] = uint8(len(b) - 3)
+		_, err = deserializePathAttrs(b)
+		assert.NotNil(t, err)
+		b[0] = c.invalidFlags
+		_, err = deserializePathAttrs(b)
+		assert.NotNil(t, err)
+	}
+
+	// link state errors
+	ls := &PathAttrLinkState{}
+	b, err = ls.serialize()
 	if err != nil {
 		t.Fatal(err)
 	}
-	// set flags to invalid value
+	b = append(b, 0)
+	b[2] = 1
+	_, err = deserializePathAttrs(b)
+	assert.NotNil(t, err)
 	b[0] = 0
 	_, err = deserializePathAttrs(b)
 	assert.NotNil(t, err)
@@ -71,14 +362,12 @@ func TestUpdateSerialization(t *testing.T) {
 	}
 	binary.BigEndian.PutUint16(b[0:2], uint16(100))
 	err = u.deserialize(b)
-	log.Println(err)
 	assert.NotNil(t, err)
 
 	// path attr invalid len
 	binary.BigEndian.PutUint16(b[0:2], uint16(0))
 	binary.BigEndian.PutUint16(b[2:4], uint16(200))
 	err = u.deserialize(b)
-	log.Println(err)
 	assert.NotNil(t, err)
 }
 
