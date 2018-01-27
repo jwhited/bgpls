@@ -11,6 +11,26 @@ import (
 	"github.com/stretchr/testify/suite"
 )
 
+func TestFSMString(t *testing.T) {
+	cases := []struct {
+		state FSMState
+		str   string
+	}{
+		{DisabledState, "disabled"},
+		{IdleState, "idle"},
+		{ConnectState, "connect"},
+		{ActiveState, "active"},
+		{OpenSentState, "openSent"},
+		{OpenConfirmState, "openConfirm"},
+		{EstablishedState, "established"},
+		{FSMState(10), "unknown state"},
+	}
+
+	for _, c := range cases {
+		assert.Equal(t, c.state.String(), c.str)
+	}
+}
+
 type fsmTestSuite struct {
 	suite.Suite
 	neighborConfig *NeighborConfig
