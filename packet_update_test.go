@@ -8,6 +8,171 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func TestPathAttrLinkState(t *testing.T) {
+	ls := &PathAttrLinkState{}
+	assert.Equal(t, ls.Flags(), PathAttrFlags{})
+	assert.Equal(t, ls.Type(), PathAttrLinkStateType)
+	err := ls.deserialize(PathAttrFlags{}, []byte{})
+	assert.Nil(t, err)
+
+	// 0 > len < 4
+	err = ls.deserialize(PathAttrFlags{}, []byte{0})
+	assert.NotNil(t, err)
+
+	// invalid attr len
+	err = ls.deserialize(PathAttrFlags{}, []byte{0, 0, 0, 100, 0})
+	assert.NotNil(t, err)
+
+	// err on attr deserialization
+	cases := []struct {
+		a uint16
+		b []byte
+	}{
+		{
+			uint16(NodeAttrCodeIsIsAreaID),
+			[]byte{0},
+		},
+		{
+			uint16(NodeAttrCodeLocalIPv4RouterID),
+			[]byte{0},
+		},
+		{
+			uint16(NodeAttrCodeLocalIPv6RouterID),
+			[]byte{0},
+		},
+		{
+			uint16(NodeAttrCodeMultiTopologyID),
+			[]byte{0},
+		},
+		{
+			uint16(NodeAttrCodeNodeFlagBits),
+			[]byte{0, 0},
+		},
+		{
+			uint16(LinkAttrCodeAdminGroup),
+			[]byte{0, 0},
+		},
+		{
+			uint16(LinkAttrCodeIgpMetric),
+			[]byte{0, 0, 0, 0},
+		},
+		{
+			uint16(LinkAttrCodeLinkProtectionType),
+			[]byte{0, 0, 0, 0},
+		},
+		{
+			uint16(LinkAttrCodeMaxLinkBandwidth),
+			[]byte{0, 0, 0},
+		},
+		{
+			uint16(LinkAttrCodeMaxReservableLinkBandwidth),
+			[]byte{0, 0, 0},
+		},
+		{
+			uint16(LinkAttrCodeMplsProtocolMask),
+			[]byte{0, 0, 0},
+		},
+		{
+			uint16(LinkAttrCodeRemoteIPv4RouterID),
+			[]byte{0, 0, 0},
+		},
+		{
+			uint16(LinkAttrCodeRemoteIPv6RouterID),
+			[]byte{0, 0, 0},
+		},
+		{
+			uint16(LinkAttrCodeSharedRiskLinkGroup),
+			[]byte{0, 0, 0},
+		},
+		{
+			uint16(LinkAttrCodeTEDefaultMetric),
+			[]byte{0, 0, 0},
+		},
+		{
+			uint16(LinkAttrCodeUnreservedBandwidth),
+			[]byte{0, 0, 0},
+		},
+		{
+			uint16(LinkAttrCodePeerNodeSID),
+			[]byte{0, 0, 0},
+		},
+		{
+			uint16(LinkAttrCodePeerAdjSID),
+			[]byte{0, 0, 0},
+		},
+		{
+			uint16(LinkAttrCodePeerSetSID),
+			[]byte{0, 0, 0},
+		},
+		{
+			uint16(PrefixAttrCodeIgpExtendedRouteTag),
+			[]byte{0, 0, 0},
+		},
+		{
+			uint16(PrefixAttrCodeIgpFlags),
+			[]byte{0, 0, 0},
+		},
+		{
+			uint16(PrefixAttrCodeIgpRouteTag),
+			[]byte{0, 0, 0},
+		},
+		{
+			uint16(PrefixAttrCodeOspfForwardingAddress),
+			[]byte{0, 0, 0},
+		},
+		{
+			uint16(PrefixAttrCodePrefixMetric),
+			[]byte{0, 0, 0},
+		},
+		{
+			uint16(0),
+			[]byte{0, 0, 0},
+		},
+	}
+
+	for _, c := range cases {
+		b := make([]byte, 4)
+		binary.BigEndian.PutUint16(b[:2], uint16(c.a))
+		binary.BigEndian.PutUint16(b[2:], uint16(len(c.b)))
+		b = append(b, c.b...)
+		err = ls.deserialize(PathAttrFlags{}, b)
+		assert.NotNil(t, err)
+	}
+
+	// node attrs err on serialization
+	ls = &PathAttrLinkState{
+		NodeAttrs: []NodeAttr{
+			&NodeAttrLocalIPv4RouterID{
+				Address: []byte{0},
+			},
+		},
+	}
+	_, err = ls.serialize()
+	assert.NotNil(t, err)
+
+	// link attrs err on serialization
+	ls = &PathAttrLinkState{
+		LinkAttrs: []LinkAttr{
+			&LinkAttrRemoteIPv4RouterID{
+				Address: []byte{0},
+			},
+		},
+	}
+	_, err = ls.serialize()
+	assert.NotNil(t, err)
+
+	// prefix attrs err on serialization
+	ls = &PathAttrLinkState{
+		PrefixAttrs: []PrefixAttr{
+			&PrefixAttrOspfForwardingAddress{
+				Address: []byte{0},
+			},
+		},
+	}
+	_, err = ls.serialize()
+	assert.NotNil(t, err)
+}
+
 func TestPathAttrFlags(t *testing.T) {
 	cases := []struct {
 		f   PathAttrFlags
@@ -53,9 +218,10 @@ func TestValidatePathAttrFlags(t *testing.T) {
 		cat pathAttrCategory
 		err bool
 	}{
-		{PathAttrFlags{
-			Transitive: true,
-		},
+		{
+			PathAttrFlags{
+				Transitive: true,
+			},
 			pathAttrCatWellKnownMandatory,
 			false,
 		},
