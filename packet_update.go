@@ -718,12 +718,7 @@ func deserializeIPv4Addr(b []byte) (net.IP, error) {
 		return nil, errors.New("invalid length for ipv4 address")
 	}
 
-	addr, err := bytesToIPAddress(b)
-	if err != nil {
-		return nil, fmt.Errorf("error deserializing ipv4 address: %v", err)
-	}
-
-	return addr, err
+	return net.IP(b), nil
 }
 
 func deserializeIPv6Addr(b []byte) (net.IP, error) {
@@ -731,12 +726,7 @@ func deserializeIPv6Addr(b []byte) (net.IP, error) {
 		return nil, errors.New("invalid length for ipv6 address")
 	}
 
-	addr, err := bytesToIPAddress(b)
-	if err != nil {
-		return nil, fmt.Errorf("error deserializing ipv6 address: %v", err)
-	}
-
-	return addr, err
+	return net.IP(b), nil
 }
 
 // NodeAttrCode describes the type of node attribute contained in a bgp-ls attribute
@@ -1695,16 +1685,8 @@ func (s *BaseSID) deserialize(b []byte) error {
 		s.Variable = offset
 	case 20:
 		b = b[4:]
-		addr, err := bytesToIPAddress(b)
-		if err != nil {
-			return &errWithNotification{
-				error:   fmt.Errorf("error deserializing v6 address in SID: %v", err),
-				code:    NotifErrCodeUpdateMessage,
-				subcode: NotifErrSubcodeMalformedAttr,
-			}
-		}
 		sid := &IPv6SID{
-			Address: addr,
+			Address: net.IP(b),
 		}
 		s.Variable = sid
 	}
@@ -2055,11 +2037,7 @@ func (p *PrefixAttrOspfForwardingAddress) deserialize(b []byte) error {
 		}
 	}
 
-	addr, err := bytesToIPAddress(b)
-	if err != nil {
-		return err
-	}
-	p.Address = addr
+	p.Address = net.IP(b)
 	return nil
 }
 
@@ -2946,26 +2924,8 @@ func (n *NodeDescriptorIgpRouterIDOspfPseudo) deserialize(b []byte) error {
 		}
 	}
 
-	drRouterID, err := bytesToIPAddress(b[:4])
-	if err != nil {
-		return &errWithNotification{
-			error:   fmt.Errorf("error deserializing drRouterID in igp router ID node descriptor: %v", err),
-			code:    NotifErrCodeUpdateMessage,
-			subcode: NotifErrSubcodeMalformedAttr,
-		}
-	}
-	n.DrRouterID = drRouterID
-
-	drInterfaceToLAN, err := bytesToIPAddress(b[4:])
-	if err != nil {
-		return &errWithNotification{
-			error:   fmt.Errorf("error deserializing drInterfaceToLan in igp router ID node descriptor: %v", err),
-			code:    NotifErrCodeUpdateMessage,
-			subcode: NotifErrSubcodeMalformedAttr,
-		}
-	}
-	n.DrInterfaceToLAN = drInterfaceToLAN
-
+	n.DrRouterID = net.IP(b[:4])
+	n.DrInterfaceToLAN = net.IP(b[4:])
 	return nil
 }
 
@@ -3872,13 +3832,7 @@ func (p *PrefixDescriptorIPReachabilityInfo) deserialize(b []byte) error {
 
 	p.PrefixLength = b[0]
 	b = b[1:]
-
-	addr, err := bytesToIPAddress(b)
-	if err != nil {
-		return err
-	}
-
-	p.Prefix = addr
+	p.Prefix = net.IP(b)
 	return nil
 }
 

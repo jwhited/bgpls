@@ -859,6 +859,14 @@ func TestUpdateMessage(t *testing.T) {
 					Type:   LinkAttrIgpMetricIsIsSmallType,
 					Metric: 42,
 				},
+				&LinkAttrIgpMetric{
+					Type:   LinkAttrIgpMetricOspfType,
+					Metric: 42,
+				},
+				&LinkAttrIgpMetric{
+					Type:   LinkAttrIgpMetricIsIsWideType,
+					Metric: 42,
+				},
 				&LinkAttrSharedRiskLinkGroup{
 					Groups: []uint32{24, 15, 16},
 				},
@@ -961,7 +969,10 @@ func TestUpdateMessage(t *testing.T) {
 			},
 			PrefixAttrs: []PrefixAttr{
 				&PrefixAttrIgpFlags{
-					IsIsDown: true,
+					IsIsDown:          true,
+					OspfNoUnicast:     true,
+					OspfLocalAddress:  true,
+					OspfPropagateNssa: true,
 				},
 				&PrefixAttrIgpRouteTag{
 					Tags: []uint32{1, 2, 3, 4},
