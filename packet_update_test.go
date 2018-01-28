@@ -8,6 +8,95 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func TestPathAttrOrigin(t *testing.T) {
+	cases := []struct {
+		c OriginCode
+		s string
+	}{
+		{OriginCodeIGP, "igp"},
+		{OriginCodeEGP, "egp"},
+		{OriginCodeIncomplete, "incomplete"},
+		{OriginCode(3), "unknown"},
+	}
+
+	for _, c := range cases {
+		assert.Equal(t, c.c.String(), c.s)
+	}
+
+	o := &PathAttrOrigin{}
+	assert.Equal(t, o.Type(), PathAttrOriginType)
+	assert.Equal(t, o.Flags(), PathAttrFlags{})
+
+	// empty attr
+	err := o.deserialize(PathAttrFlags{}, []byte{})
+	assert.NotNil(t, err)
+}
+
+func TestPathAttrAsPath(t *testing.T) {
+	asp := &PathAttrAsPath{}
+	assert.Equal(t, asp.Type(), PathAttrAsPathType)
+	assert.Equal(t, asp.Flags(), PathAttrFlags{})
+
+	// extended len
+	segments := make([]AsPathSegment, 0)
+	for i := 1; i < 256; i++ {
+		segments = append(segments, &AsPathSegmentSet{Set: []uint16{1}})
+	}
+	asp.Segments = segments
+	_, err := asp.serialize()
+	assert.Nil(t, err)
+
+	// empty attr
+	err = asp.deserialize(PathAttrFlags{}, []byte{})
+	assert.Nil(t, err)
+
+	// < 2 bytes
+	err = asp.deserialize(PathAttrFlags{}, []byte{1})
+	assert.NotNil(t, err)
+
+	// invalid segment len
+	err = asp.deserialize(PathAttrFlags{}, []byte{0, 100, 0, 0})
+	assert.NotNil(t, err)
+
+	// invalid segment type
+	err = asp.deserialize(PathAttrFlags{}, []byte{0, 2, 0, 0, 0, 0})
+	assert.NotNil(t, err)
+
+	// err deserialize sequence type
+	err = asp.deserialize(PathAttrFlags{}, []byte{2, 0})
+	assert.NotNil(t, err)
+
+	// err deserialize set type
+	err = asp.deserialize(PathAttrFlags{}, []byte{1, 0})
+	assert.NotNil(t, err)
+
+	// error serializing segments
+	asp = &PathAttrAsPath{
+		Segments: []AsPathSegment{
+			&AsPathSegmentSet{},
+			&AsPathSegmentSequence{},
+		},
+	}
+	_, err = asp.serialize()
+	assert.NotNil(t, err)
+
+	// segment tests
+	seq := &AsPathSegmentSequence{}
+	assert.Equal(t, seq.Type(), AsPathSegmentSequenceType)
+	_, err = seq.serialize()
+	assert.NotNil(t, err)
+	set := &AsPathSegmentSet{}
+	assert.Equal(t, set.Type(), AsPathSegmentSetType)
+	_, err = seq.serialize()
+	assert.NotNil(t, err)
+}
+
+func TestPathAttrLocalPref(t *testing.T) {
+	lp := &PathAttrLocalPref{}
+	assert.Equal(t, lp.Type(), PathAttrLocalPrefType)
+	assert.Equal(t, lp.Flags(), PathAttrFlags{})
+}
+
 func TestIPTlvSerialization(t *testing.T) {
 	b, err := serializeBgpLsIPv4TLV(1, []byte{1, 1, 1, 1})
 	assert.Nil(t, err)
@@ -613,11 +702,79 @@ func TestNodeAttrs(t *testing.T) {
 	assert.NotNil(t, err)
 }
 
+func TestDeserializeLinkDescriptors(t *testing.T) {
+	// len < 4
+	_, err := deserializeLinkDescriptors(0, []byte{})
+	assert.NotNil(t, err)
+
+	// invalid descriptor len
+	_, err = deserializeLinkDescriptors(0, []byte{0, 0, 0, 10, 0})
+	assert.NotNil(t, err)
+
+	// err deserializing link ids
+	_, err = deserializeLinkDescriptors(0, []byte{1, 2, 0, 0})
+	assert.NotNil(t, err)
+
+	// err deserializing ipv4 int address
+	_, err = deserializeLinkDescriptors(0, []byte{1, 3, 0, 0})
+	assert.NotNil(t, err)
+
+	// err deserializing ipv4 neighbor address
+	_, err = deserializeLinkDescriptors(0, []byte{1, 4, 0, 0})
+	assert.NotNil(t, err)
+
+	// err deserializing ipv6 int address
+	_, err = deserializeLinkDescriptors(0, []byte{1, 5, 0, 0})
+	assert.NotNil(t, err)
+
+	// err deserializing ipv6 neighbor address
+	_, err = deserializeLinkDescriptors(0, []byte{1, 6, 0, 0})
+	assert.NotNil(t, err)
+
+	// err deserializing multi topo ids
+	_, err = deserializeLinkDescriptors(0, []byte{1, 7, 0, 0})
+	assert.NotNil(t, err)
+
+	// invalid link descriptor code
+	_, err = deserializeLinkDescriptors(0, []byte{0, 0, 0, 0})
+	assert.NotNil(t, err)
+}
+
+func TestDeserializePrefixDescriptors(t *testing.T) {
+	// len < 4
+	_, err := deserializePrefixDescriptors(0, []byte{})
+	assert.NotNil(t, err)
+
+	// invalid descriptor len
+	_, err = deserializePrefixDescriptors(0, []byte{0, 0, 0, 10, 0})
+	assert.NotNil(t, err)
+
+	// err deserializing multi topo id
+	_, err = deserializePrefixDescriptors(0, []byte{1, 7, 0, 0})
+	assert.NotNil(t, err)
+
+	// err deserializing ospf route type
+	_, err = deserializePrefixDescriptors(0, []byte{1, 8, 0, 0})
+	assert.NotNil(t, err)
+
+	// err deserializing ip reachability info
+	_, err = deserializePrefixDescriptors(0, []byte{1, 9, 0, 0})
+	assert.NotNil(t, err)
+
+	// invalid prefix descriptor code
+	_, err = deserializePrefixDescriptors(0, []byte{0, 0, 0, 0})
+	assert.NotNil(t, err)
+}
+
 func TestPrefixDescriptors(t *testing.T) {
 	descriptors := []PrefixDescriptor{
 		&PrefixDescriptorIPReachabilityInfo{
 			PrefixLength: uint8(32),
 			Prefix:       net.ParseIP("1.2.3.4").To4(),
+		},
+		&PrefixDescriptorIPReachabilityInfo{
+			PrefixLength: uint8(128),
+			Prefix:       net.ParseIP("2601::").To16(),
 		},
 		&PrefixDescriptorMultiTopologyID{
 			IDs: []uint16{0, 1, 2},
@@ -634,6 +791,16 @@ func TestPrefixDescriptors(t *testing.T) {
 		err = d.deserialize(b)
 		assert.NotNil(t, err)
 	}
+
+	// invalid addr
+	r := &PrefixDescriptorIPReachabilityInfo{}
+	_, err := r.serialize()
+	assert.NotNil(t, err)
+
+	// invalid route type
+	o := &PrefixDescriptorOspfRouteType{}
+	err = o.deserialize([]byte{0})
+	assert.NotNil(t, err)
 }
 
 func TestLinkDescriptors(t *testing.T) {

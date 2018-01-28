@@ -3275,11 +3275,7 @@ func serializeMultiTopologyIDs(t uint16, ids []uint16) ([]byte, error) {
 func deserializeMultiTopologyIDs(b []byte) ([]uint16, error) {
 	ids := make([]uint16, 0)
 
-	if len(b) == 0 {
-		return ids, nil
-	}
-
-	if len(b)%2 != 0 {
+	if len(b)%2 != 0 || len(b) < 2 {
 		return nil, &errWithNotification{
 			error:   errors.New("invalid length for multi topology ID link state tlv"),
 			code:    NotifErrCodeUpdateMessage,
@@ -3971,6 +3967,10 @@ func (a *AsPathSegmentSet) serialize() ([]byte, error) {
 	b[0] = byte(AsPathSegmentSetType)
 	b[1] = byte(len(a.Set))
 
+	if len(a.Set) < 1 {
+		return nil, errors.New("no asns in aspath segment")
+	}
+
 	for _, s := range a.Set {
 		asn := make([]byte, 2)
 		binary.BigEndian.PutUint16(asn, s)
@@ -4004,6 +4004,10 @@ func (a *AsPathSegmentSequence) serialize() ([]byte, error) {
 	b := make([]byte, 2)
 	b[0] = byte(AsPathSegmentSequenceType)
 	b[1] = byte(len(a.Sequence))
+
+	if len(a.Sequence) < 1 {
+		return nil, errors.New("no asns in aspath segment")
+	}
 
 	for _, s := range a.Sequence {
 		asn := make([]byte, 2)
@@ -4104,7 +4108,7 @@ func (a *PathAttrAsPath) deserialize(f PathAttrFlags, b []byte) error {
 	}
 
 	for {
-		if len(b) < 4 {
+		if len(b) < 2 {
 			return &errWithNotification{
 				error:   errors.New("invalid as path length"),
 				code:    NotifErrCodeUpdateMessage,
