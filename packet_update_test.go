@@ -8,6 +8,30 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func TestIPTlvSerialization(t *testing.T) {
+	b, err := serializeBgpLsIPv4TLV(1, []byte{1, 1, 1, 1})
+	assert.Nil(t, err)
+	assert.Equal(t, b, []byte{0, 1, 0, 4, 1, 1, 1, 1})
+	_, err = serializeBgpLsIPv4TLV(1, []byte{1, 1, 1, 1, 1})
+	assert.NotNil(t, err)
+
+	b, err = serializeBgpLsIPv6TLV(1, []byte{1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1})
+	assert.Nil(t, err)
+	assert.Equal(t, b, []byte{0, 1, 0, 16, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1})
+	_, err = serializeBgpLsIPv6TLV(1, []byte{1, 1, 1, 1, 1})
+	assert.NotNil(t, err)
+
+	_, err = deserializeIPv4Addr([]byte{1, 1, 1, 1})
+	assert.Nil(t, err)
+	_, err = deserializeIPv4Addr([]byte{1, 1, 1, 1, 1})
+	assert.NotNil(t, err)
+
+	_, err = deserializeIPv6Addr([]byte{1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1})
+	assert.Nil(t, err)
+	_, err = deserializeIPv6Addr([]byte{1, 1, 1, 1, 1})
+	assert.NotNil(t, err)
+}
+
 func TestPathAttrLinkState(t *testing.T) {
 	ls := &PathAttrLinkState{}
 	assert.Equal(t, ls.Flags(), PathAttrFlags{})
@@ -49,12 +73,24 @@ func TestPathAttrLinkState(t *testing.T) {
 			[]byte{0, 0},
 		},
 		{
+			uint16(NodeAttrCodeNodeName),
+			[]byte{},
+		},
+		{
+			uint16(NodeAttrCodeOpaqueNodeAttr),
+			[]byte{},
+		},
+		{
 			uint16(LinkAttrCodeAdminGroup),
 			[]byte{0, 0},
 		},
 		{
 			uint16(LinkAttrCodeIgpMetric),
 			[]byte{0, 0, 0, 0},
+		},
+		{
+			uint16(LinkAttrCodeLinkName),
+			[]byte{},
 		},
 		{
 			uint16(LinkAttrCodeLinkProtectionType),
@@ -83,6 +119,10 @@ func TestPathAttrLinkState(t *testing.T) {
 		{
 			uint16(LinkAttrCodeSharedRiskLinkGroup),
 			[]byte{0, 0, 0},
+		},
+		{
+			uint16(LinkAttrCodeOpaqueLinkAttr),
+			[]byte{},
 		},
 		{
 			uint16(LinkAttrCodeTEDefaultMetric),
@@ -115,6 +155,10 @@ func TestPathAttrLinkState(t *testing.T) {
 		{
 			uint16(PrefixAttrCodeIgpRouteTag),
 			[]byte{0, 0, 0},
+		},
+		{
+			uint16(PrefixAttrCodeOpaquePrefixAttribute),
+			[]byte{},
 		},
 		{
 			uint16(PrefixAttrCodeOspfForwardingAddress),
@@ -397,6 +441,10 @@ func TestPrefixAttrs(t *testing.T) {
 		err = a.deserialize(b)
 		assert.NotNil(t, err)
 	}
+
+	p := &PrefixAttrOpaquePrefixAttribute{}
+	_, err := p.serialize()
+	assert.NotNil(t, err)
 }
 
 func TestLinkAttrs(t *testing.T) {
@@ -527,6 +575,10 @@ func TestLinkAttrs(t *testing.T) {
 		err = a.deserialize(b)
 		assert.NotNil(t, err)
 	}
+
+	l := &LinkAttrOpaqueLinkAttr{}
+	_, err := l.serialize()
+	assert.NotNil(t, err)
 }
 
 func TestNodeAttrs(t *testing.T) {
@@ -555,6 +607,10 @@ func TestNodeAttrs(t *testing.T) {
 		err = a.deserialize(b)
 		assert.NotNil(t, err)
 	}
+
+	n := &NodeAttrOpaqueNodeAttr{}
+	_, err := n.serialize()
+	assert.NotNil(t, err)
 }
 
 func TestPrefixDescriptors(t *testing.T) {
@@ -859,6 +915,14 @@ func TestUpdateMessage(t *testing.T) {
 					Type:   LinkAttrIgpMetricIsIsSmallType,
 					Metric: 42,
 				},
+				&LinkAttrIgpMetric{
+					Type:   LinkAttrIgpMetricOspfType,
+					Metric: 42,
+				},
+				&LinkAttrIgpMetric{
+					Type:   LinkAttrIgpMetricIsIsWideType,
+					Metric: 42,
+				},
 				&LinkAttrSharedRiskLinkGroup{
 					Groups: []uint32{24, 15, 16},
 				},
@@ -958,10 +1022,23 @@ func TestUpdateMessage(t *testing.T) {
 						},
 					},
 				},
+				&LinkAttrPeerSetSID{
+					BaseSID: BaseSID{
+						Value:  true,
+						Local:  true,
+						Weight: 1,
+						Variable: &IPv6SID{
+							Address: net.ParseIP("2601::"),
+						},
+					},
+				},
 			},
 			PrefixAttrs: []PrefixAttr{
 				&PrefixAttrIgpFlags{
-					IsIsDown: true,
+					IsIsDown:          true,
+					OspfNoUnicast:     true,
+					OspfLocalAddress:  true,
+					OspfPropagateNssa: true,
 				},
 				&PrefixAttrIgpRouteTag{
 					Tags: []uint32{1, 2, 3, 4},

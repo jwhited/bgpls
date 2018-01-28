@@ -9,37 +9,6 @@ import (
 	"net"
 )
 
-/*
-4.3.  UPDATE Message Format
-
-   UPDATE messages are used to transfer routing information between BGP
-   peers.  The information in the UPDATE message can be used to
-   construct a graph that describes the relationships of the various
-   Autonomous Systems.  By applying rules to be discussed, routing
-   information loops and some other anomalies may be detected and
-   removed from inter-AS routing.
-
-   An UPDATE message is used to advertise feasible routes that share
-   common path attributes to a peer, or to withdraw multiple unfeasible
-   routes from service (see 3.1).  An UPDATE message MAY simultaneously
-   advertise a feasible route and withdraw multiple unfeasible routes
-   from service.  The UPDATE message always includes the fixed-size BGP
-   header, and also includes the other fields, as shown below (note,
-   some of the shown fields may not be present in every UPDATE message):
-
-      +-----------------------------------------------------+
-      |   Withdrawn Routes Length (2 octets)                |
-      +-----------------------------------------------------+
-      |   Withdrawn Routes (variable)                       |
-      +-----------------------------------------------------+
-      |   Total Path Attribute Length (2 octets)            |
-      +-----------------------------------------------------+
-      |   Path Attributes (variable)                        |
-      +-----------------------------------------------------+
-      |   Network Layer Reachability Information (variable) |
-      +-----------------------------------------------------+
-*/
-
 // UpdateMessage is a bgp message.
 type UpdateMessage struct {
 	PathAttrs []PathAttr
@@ -678,13 +647,17 @@ func (p *PathAttrLinkState) serialize() ([]byte, error) {
 }
 
 // 2 octet type and 2 octet length
-func serializeBgpLsStringTLV(l uint16, s string) []byte {
+func serializeBgpLsStringTLV(l uint16, s string) ([]byte, error) {
+	if len(s) < 1 {
+		return nil, errors.New("empty string")
+	}
+
 	val := reverseByteOrder([]byte(s))
 	b := make([]byte, 4)
 	binary.BigEndian.PutUint16(b[:2], l)
 	binary.BigEndian.PutUint16(b[2:], uint16(len(val)))
 	b = append(b, val...)
-	return b
+	return b, nil
 }
 
 // 2 octet type and 2 octet length
@@ -718,12 +691,7 @@ func deserializeIPv4Addr(b []byte) (net.IP, error) {
 		return nil, errors.New("invalid length for ipv4 address")
 	}
 
-	addr, err := bytesToIPAddress(b)
-	if err != nil {
-		return nil, fmt.Errorf("error deserializing ipv4 address: %v", err)
-	}
-
-	return addr, err
+	return net.IP(b), nil
 }
 
 func deserializeIPv6Addr(b []byte) (net.IP, error) {
@@ -731,12 +699,7 @@ func deserializeIPv6Addr(b []byte) (net.IP, error) {
 		return nil, errors.New("invalid length for ipv6 address")
 	}
 
-	addr, err := bytesToIPAddress(b)
-	if err != nil {
-		return nil, fmt.Errorf("error deserializing ipv6 address: %v", err)
-	}
-
-	return addr, err
+	return net.IP(b), nil
 }
 
 // NodeAttrCode describes the type of node attribute contained in a bgp-ls attribute
@@ -866,11 +829,21 @@ func (n *NodeAttrOpaqueNodeAttr) Code() NodeAttrCode {
 }
 
 func (n *NodeAttrOpaqueNodeAttr) deserialize(b []byte) error {
+	if len(b) < 1 {
+		return &errWithNotification{
+			error:   errors.New("node attr opaqe too short"),
+			code:    NotifErrCodeUpdateMessage,
+			subcode: NotifErrSubcodeMalformedAttr,
+		}
+	}
 	n.Data = b
 	return nil
 }
 
 func (n *NodeAttrOpaqueNodeAttr) serialize() ([]byte, error) {
+	if len(n.Data) < 1 {
+		return nil, errors.New("empty opaque data")
+	}
 	b := make([]byte, 4, len(n.Data)+4)
 	binary.BigEndian.PutUint16(b[:2], uint16(n.Code()))
 	binary.BigEndian.PutUint16(b[2:], uint16(len(n.Data)))
@@ -892,7 +865,11 @@ func (n *NodeAttrNodeName) Code() NodeAttrCode {
 
 func (n *NodeAttrNodeName) deserialize(b []byte) error {
 	if len(b) < 1 {
-		return nil
+		return &errWithNotification{
+			error:   errors.New("node attr node name too short"),
+			code:    NotifErrCodeUpdateMessage,
+			subcode: NotifErrSubcodeMalformedAttr,
+		}
 	}
 	b = reverseByteOrder(b)
 	n.Name = string(b)
@@ -900,7 +877,7 @@ func (n *NodeAttrNodeName) deserialize(b []byte) error {
 }
 
 func (n *NodeAttrNodeName) serialize() ([]byte, error) {
-	return serializeBgpLsStringTLV(uint16(n.Code()), n.Name), nil
+	return serializeBgpLsStringTLV(uint16(n.Code()), n.Name)
 }
 
 // NodeAttrIsIsAreaID is a node attribute contained in a bgp-ls attribute.
@@ -1445,19 +1422,6 @@ const (
 	LinkAttrIgpMetricIsIsWideType
 )
 
-func (l LinkAttrIgpMetricType) String() string {
-	switch l {
-	case LinkAttrIgpMetricIsIsSmallType:
-		return "is-is small"
-	case LinkAttrIgpMetricOspfType:
-		return "ospf"
-	case LinkAttrIgpMetricIsIsWideType:
-		return "is-is wide"
-	default:
-		return "unknown igp metric type"
-	}
-}
-
 // Code returns the appropriate LinkAttrCode for LinkAttrIgpMetric.
 func (l *LinkAttrIgpMetric) Code() LinkAttrCode {
 	return LinkAttrCodeIgpMetric
@@ -1579,11 +1543,22 @@ func (l *LinkAttrOpaqueLinkAttr) Code() LinkAttrCode {
 }
 
 func (l *LinkAttrOpaqueLinkAttr) deserialize(b []byte) error {
+	if len(b) < 1 {
+		return &errWithNotification{
+			error:   errors.New("link attr opaque too short"),
+			code:    NotifErrCodeUpdateMessage,
+			subcode: NotifErrSubcodeMalformedAttr,
+		}
+	}
+
 	l.Data = b
 	return nil
 }
 
 func (l *LinkAttrOpaqueLinkAttr) serialize() ([]byte, error) {
+	if len(l.Data) < 1 {
+		return nil, errors.New("empty link attr opaque data")
+	}
 	b := make([]byte, 4)
 	binary.BigEndian.PutUint16(b[:2], uint16(l.Code()))
 	binary.BigEndian.PutUint16(b[2:], uint16(len(l.Data)))
@@ -1604,13 +1579,21 @@ func (l *LinkAttrLinkName) Code() LinkAttrCode {
 }
 
 func (l *LinkAttrLinkName) deserialize(b []byte) error {
+	if len(b) < 1 {
+		return &errWithNotification{
+			error:   errors.New("link attr link name too short"),
+			code:    NotifErrCodeUpdateMessage,
+			subcode: NotifErrSubcodeMalformedAttr,
+		}
+	}
+
 	b = reverseByteOrder(b)
 	l.Name = string(b)
 	return nil
 }
 
 func (l *LinkAttrLinkName) serialize() ([]byte, error) {
-	return serializeBgpLsStringTLV(uint16(l.Code()), l.Name), nil
+	return serializeBgpLsStringTLV(uint16(l.Code()), l.Name)
 }
 
 // BaseSID contains the fields shared between PeerNodeSID, PeerAdjSID, and PeerSetSID link attrs
@@ -1695,16 +1678,8 @@ func (s *BaseSID) deserialize(b []byte) error {
 		s.Variable = offset
 	case 20:
 		b = b[4:]
-		addr, err := bytesToIPAddress(b)
-		if err != nil {
-			return &errWithNotification{
-				error:   fmt.Errorf("error deserializing v6 address in SID: %v", err),
-				code:    NotifErrCodeUpdateMessage,
-				subcode: NotifErrSubcodeMalformedAttr,
-			}
-		}
 		sid := &IPv6SID{
-			Address: addr,
+			Address: net.IP(b),
 		}
 		s.Variable = sid
 	}
@@ -2055,11 +2030,7 @@ func (p *PrefixAttrOspfForwardingAddress) deserialize(b []byte) error {
 		}
 	}
 
-	addr, err := bytesToIPAddress(b)
-	if err != nil {
-		return err
-	}
-	p.Address = addr
+	p.Address = net.IP(b)
 	return nil
 }
 
@@ -2084,11 +2055,22 @@ func (p *PrefixAttrOpaquePrefixAttribute) Code() PrefixAttrCode {
 }
 
 func (p *PrefixAttrOpaquePrefixAttribute) deserialize(b []byte) error {
+	if len(b) < 1 {
+		return &errWithNotification{
+			error:   errors.New("prefix attr opaque too short"),
+			code:    NotifErrCodeUpdateMessage,
+			subcode: NotifErrSubcodeMalformedAttr,
+		}
+	}
+
 	p.Data = b
 	return nil
 }
 
 func (p *PrefixAttrOpaquePrefixAttribute) serialize() ([]byte, error) {
+	if len(p.Data) < 1 {
+		return nil, errors.New("empty prefix attr opaque data")
+	}
 	b := make([]byte, 4)
 	binary.BigEndian.PutUint16(b[:2], uint16(p.Code()))
 	binary.BigEndian.PutUint16(b[2:], uint16(len(p.Data)))
@@ -2946,26 +2928,8 @@ func (n *NodeDescriptorIgpRouterIDOspfPseudo) deserialize(b []byte) error {
 		}
 	}
 
-	drRouterID, err := bytesToIPAddress(b[:4])
-	if err != nil {
-		return &errWithNotification{
-			error:   fmt.Errorf("error deserializing drRouterID in igp router ID node descriptor: %v", err),
-			code:    NotifErrCodeUpdateMessage,
-			subcode: NotifErrSubcodeMalformedAttr,
-		}
-	}
-	n.DrRouterID = drRouterID
-
-	drInterfaceToLAN, err := bytesToIPAddress(b[4:])
-	if err != nil {
-		return &errWithNotification{
-			error:   fmt.Errorf("error deserializing drInterfaceToLan in igp router ID node descriptor: %v", err),
-			code:    NotifErrCodeUpdateMessage,
-			subcode: NotifErrSubcodeMalformedAttr,
-		}
-	}
-	n.DrInterfaceToLAN = drInterfaceToLAN
-
+	n.DrRouterID = net.IP(b[:4])
+	n.DrInterfaceToLAN = net.IP(b[4:])
 	return nil
 }
 
@@ -3872,13 +3836,7 @@ func (p *PrefixDescriptorIPReachabilityInfo) deserialize(b []byte) error {
 
 	p.PrefixLength = b[0]
 	b = b[1:]
-
-	addr, err := bytesToIPAddress(b)
-	if err != nil {
-		return err
-	}
-
-	p.Prefix = addr
+	p.Prefix = net.IP(b)
 	return nil
 }
 
