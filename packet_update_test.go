@@ -835,6 +835,32 @@ func TestLinkDescriptors(t *testing.T) {
 	}
 }
 
+func TestDeserializeNodeDescriptors(t *testing.T) {
+	// too short
+	_, err := deserializeNodeDescriptors(0, []byte{0})
+	assert.NotNil(t, err)
+
+	// invalid descriptor len
+	_, err = deserializeNodeDescriptors(0, []byte{0, 0, 0, 10, 0})
+	assert.NotNil(t, err)
+
+	// err deserializing node descriptors
+	for i := 512; i < 519; i++ {
+		b := make([]byte, 2)
+		binary.BigEndian.PutUint16(b, uint16(i))
+		_, err = deserializeNodeDescriptors(0, append(b, []byte{0, 0}...))
+		assert.NotNil(t, err)
+	}
+
+	// err igp router id is-is
+	_, err = deserializeNodeDescriptors(LinkStateNlriIsIsL1ProtocolID, []byte{2, 3, 0, 0})
+	assert.NotNil(t, err)
+
+	// err igp router id ospf
+	_, err = deserializeNodeDescriptors(LinkStateNlriOSPFv2ProtocolID, []byte{2, 3, 0, 0})
+	assert.NotNil(t, err)
+}
+
 func TestNodeDescriptors(t *testing.T) {
 	descriptors := []NodeDescriptor{
 		&NodeDescriptorASN{
@@ -875,6 +901,16 @@ func TestNodeDescriptors(t *testing.T) {
 		err = d.deserialize(b)
 		assert.NotNil(t, err)
 	}
+
+	// invalid router id
+	d := &NodeDescriptorIgpRouterIDOspfPseudo{}
+	_, err := d.serialize()
+	assert.NotNil(t, err)
+
+	// invalid dr interface to lan
+	d = &NodeDescriptorIgpRouterIDOspfPseudo{DrRouterID: net.ParseIP("1.1.1.1").To4()}
+	_, err = d.serialize()
+	assert.NotNil(t, err)
 }
 
 func TestUpdateMessage(t *testing.T) {
