@@ -2137,16 +2137,12 @@ func (p *PathAttrMpReach) deserialize(f PathAttrFlags, b []byte) error {
 }
 
 func deserializeLinkStateNlri(afi MultiprotoAfi, safi MultiprotoSafi, b []byte) ([]LinkStateNlri, error) {
-	if afi == BgpLsAfi || safi == BgpLsSafi {
+	if afi != BgpLsAfi || safi != BgpLsSafi {
 		return nil, &errWithNotification{
 			error:   errors.New("non bgp-ls afi/safi"),
 			code:    NotifErrCodeUpdateMessage,
 			subcode: NotifErrSubcodeMalformedAttr,
 		}
-	}
-
-	if len(b) == 0 {
-		return nil, nil
 	}
 
 	tooShortErr := &errWithNotification{
