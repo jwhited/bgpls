@@ -8,6 +8,94 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func TestLinkStateNlriLink(t *testing.T) {
+	l := &LinkStateNlriLink{}
+	assert.Equal(t, l.Type(), LinkStateNlriLinkType)
+	assert.Equal(t, l.Afi(), BgpLsAfi)
+	assert.Equal(t, l.Safi(), BgpLsSafi)
+
+	// invalid local node descriptors TLV
+	err := l.deserialize([]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0})
+	assert.NotNil(t, err)
+
+	// invalid local node descriptors len
+	err = l.deserialize([]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 100, 0, 0, 0, 0})
+	assert.NotNil(t, err)
+
+	// err deserializing node descriptors
+	err = l.deserialize([]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0})
+	assert.NotNil(t, err)
+
+	// no remote node descriptors
+	err = l.deserialize([]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 8, 2, 0, 0, 4, 0, 0, 0, 1})
+	assert.NotNil(t, err)
+
+	// invalid remote node descriptors tlv
+	err = l.deserialize([]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 8, 2, 0, 0, 4, 0, 0, 0, 1, 0, 0, 0, 0})
+	assert.NotNil(t, err)
+
+	// invalid remote node descriptors len
+	err = l.deserialize([]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 8, 2, 0, 0, 4, 0, 0, 0, 1, 1, 1, 0, 100, 0})
+	assert.NotNil(t, err)
+
+	// err deserializing remote node descriptors
+	err = l.deserialize([]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 8, 2, 0, 0, 4, 0, 0, 0, 1, 1, 1, 0, 1, 0})
+	assert.NotNil(t, err)
+
+	// no link descriptors
+	err = l.deserialize([]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 8, 2, 0, 0, 4, 0, 0, 0, 1, 1, 1, 0, 8, 2, 0, 0, 4, 0, 0, 0, 1})
+	assert.Nil(t, err)
+
+	// < 4 bytes for link descriptors
+	err = l.deserialize([]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 8, 2, 0, 0, 4, 0, 0, 0, 1, 1, 1, 0, 8, 2, 0, 0, 4, 0, 0, 0, 1, 0})
+	assert.NotNil(t, err)
+
+	// err deserializing link descriptors
+	err = l.deserialize([]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 8, 2, 0, 0, 4, 0, 0, 0, 1, 1, 1, 0, 8, 2, 0, 0, 4, 0, 0, 0, 1, 0, 0, 0, 0})
+	assert.NotNil(t, err)
+}
+
+func TestLinkStateNlriPrefix(t *testing.T) {
+	p := &LinkStateNlriPrefix{}
+	assert.Equal(t, p.Afi(), BgpLsAfi)
+	assert.Equal(t, p.Safi(), BgpLsSafi)
+
+	// invalid local node descriptors TLV
+	err := p.deserialize([]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0})
+	assert.NotNil(t, err)
+
+	// invalid local node descriptors len
+	err = p.deserialize([]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 100, 0})
+	assert.NotNil(t, err)
+
+	// err deserializing node descriptors
+	err = p.deserialize([]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0})
+	assert.NotNil(t, err)
+
+	// no prefix descriptors
+	err = p.deserialize([]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 8, 2, 0, 0, 4, 0, 0, 0, 1})
+	assert.Nil(t, err)
+
+	// < 4 bytes following node descriptors
+	err = p.deserialize([]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 8, 2, 0, 0, 4, 0, 0, 0, 1, 0})
+	assert.NotNil(t, err)
+
+	// err deserializing prefix descriptors
+	err = p.deserialize([]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 8, 2, 0, 0, 4, 0, 0, 0, 1, 0, 0, 0, 0})
+	assert.NotNil(t, err)
+
+	// err serializing node descriptors
+	p.LocalNodeDescriptors = []NodeDescriptor{&NodeDescriptorBgpRouterID{}}
+	_, err = p.serialize(LinkStateNlriIPv4PrefixType)
+	assert.NotNil(t, err)
+
+	// err serializing prefix descriptors
+	p.LocalNodeDescriptors = nil
+	p.PrefixDescriptors = []PrefixDescriptor{&PrefixDescriptorIPReachabilityInfo{}}
+	_, err = p.serialize(LinkStateNlriIPv4PrefixType)
+	assert.NotNil(t, err)
+}
+
 func TestPathAttrMpUnreach(t *testing.T) {
 	mp := &PathAttrMpUnreach{}
 	assert.Equal(t, mp.Type(), PathAttrMpUnreachType)
