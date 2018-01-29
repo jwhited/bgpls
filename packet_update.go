@@ -1687,7 +1687,7 @@ func (s *BaseSID) deserialize(b []byte) error {
 	return nil
 }
 
-func (s *BaseSID) serialize() ([]byte, error) {
+func (s *BaseSID) serialize() []byte {
 	b := make([]byte, 4)
 	if s.Value {
 		b[0] += 128
@@ -1711,7 +1711,7 @@ func (s *BaseSID) serialize() ([]byte, error) {
 		b = append(b, v.Address...)
 	}
 
-	return b, nil
+	return b
 }
 
 // LinkAttrPeerNodeSID is a link attributed contained a bgp-ls attribute
@@ -1731,10 +1731,7 @@ func (l *LinkAttrPeerNodeSID) deserialize(b []byte) error {
 }
 
 func (l *LinkAttrPeerNodeSID) serialize() ([]byte, error) {
-	b, err := l.BaseSID.serialize()
-	if err != nil {
-		return nil, err
-	}
+	b := l.BaseSID.serialize()
 
 	c := make([]byte, 4)
 	binary.BigEndian.PutUint16(c[:2], uint16(l.Code()))
@@ -1761,10 +1758,7 @@ func (l *LinkAttrPeerAdjSID) deserialize(b []byte) error {
 }
 
 func (l *LinkAttrPeerAdjSID) serialize() ([]byte, error) {
-	b, err := l.BaseSID.serialize()
-	if err != nil {
-		return nil, err
-	}
+	b := l.BaseSID.serialize()
 
 	c := make([]byte, 4)
 	binary.BigEndian.PutUint16(c[:2], uint16(l.Code()))
@@ -1791,10 +1785,7 @@ func (l *LinkAttrPeerSetSID) deserialize(b []byte) error {
 }
 
 func (l *LinkAttrPeerSetSID) serialize() ([]byte, error) {
-	b, err := l.BaseSID.serialize()
-	if err != nil {
-		return nil, err
-	}
+	b := l.BaseSID.serialize()
 
 	c := make([]byte, 4)
 	binary.BigEndian.PutUint16(c[:2], uint16(l.Code()))
