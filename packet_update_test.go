@@ -8,6 +8,34 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func TestVariableSID(t *testing.T) {
+	l := &SIDLabel{}
+	assert.Equal(t, l.Type(), BaseSIDVariableTypeSIDLabel)
+	o := &SRGBOffset{}
+	assert.Equal(t, o.Type(), BaseSIDVariableTypeSRGBOffset)
+	i := &IPv6SID{}
+	assert.Equal(t, i.Type(), BaseSIDVariableTypeIPv6SID)
+}
+
+func TestLinkStateNlriNode(t *testing.T) {
+	n := &LinkStateNlriNode{}
+	assert.Equal(t, n.Type(), LinkStateNlriNodeType)
+	assert.Equal(t, n.Afi(), BgpLsAfi)
+	assert.Equal(t, n.Safi(), BgpLsSafi)
+
+	// invalid local node descriptors TLV
+	err := n.deserialize([]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0})
+	assert.NotNil(t, err)
+
+	// invalid local node descriptors length
+	err = n.deserialize([]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 100, 0, 0, 0, 0})
+	assert.NotNil(t, err)
+
+	// err deserializing node descriptors
+	err = n.deserialize([]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 4, 0, 0, 0, 0})
+	assert.NotNil(t, err)
+}
+
 func TestLinkStateNlriLink(t *testing.T) {
 	l := &LinkStateNlriLink{}
 	assert.Equal(t, l.Type(), LinkStateNlriLinkType)
@@ -52,6 +80,23 @@ func TestLinkStateNlriLink(t *testing.T) {
 
 	// err deserializing link descriptors
 	err = l.deserialize([]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 8, 2, 0, 0, 4, 0, 0, 0, 1, 1, 1, 0, 8, 2, 0, 0, 4, 0, 0, 0, 1, 0, 0, 0, 0})
+	assert.NotNil(t, err)
+
+	// err serializing local node descriptors
+	l.LocalNodeDescriptors = []NodeDescriptor{&NodeDescriptorBgpRouterID{}}
+	_, err = l.serialize()
+	assert.NotNil(t, err)
+
+	// err serializing remote node descriptors
+	l.LocalNodeDescriptors = nil
+	l.RemoteNodeDescriptors = []NodeDescriptor{&NodeDescriptorBgpRouterID{}}
+	_, err = l.serialize()
+	assert.NotNil(t, err)
+
+	// err serializing link descriptors
+	l.RemoteNodeDescriptors = nil
+	l.LinkDescriptors = []LinkDescriptor{&LinkDescriptorIPv4NeighborAddress{}}
+	_, err = l.serialize()
 	assert.NotNil(t, err)
 }
 
@@ -263,6 +308,13 @@ func TestPathAttrLocalPref(t *testing.T) {
 	lp := &PathAttrLocalPref{}
 	assert.Equal(t, lp.Type(), PathAttrLocalPrefType)
 	assert.Equal(t, lp.Flags(), PathAttrFlags{})
+}
+
+func TestStringTLVSerialization(t *testing.T) {
+	_, err := serializeBgpLsStringTLV(0, "test")
+	assert.Nil(t, err)
+	_, err = serializeBgpLsStringTLV(0, "")
+	assert.NotNil(t, err)
 }
 
 func TestIPTlvSerialization(t *testing.T) {
