@@ -45,9 +45,9 @@ func (s *fsmTestSuite) BeforeTest(_, _ string) {
 }
 
 func (s *fsmTestSuite) AfterTest(_, _ string) {
+	s.fsm.shut()
 	s.conn.Close()
 	s.ln.Close()
-	s.fsm.shut()
 }
 
 func (s *fsmTestSuite) readMessagesFromConn() ([]Message, error) {
@@ -148,6 +148,11 @@ func (s *fsmTestSuite) advanceToOpenConfirmState() {
 	s.advanceToOpenSentState()
 
 	err := s.sendOpen()
+	if err != nil {
+		s.T().Fatal(err)
+	}
+
+	_, err = s.readMessagesFromConn()
 	if err != nil {
 		s.T().Fatal(err)
 	}
@@ -273,6 +278,22 @@ func (s *fsmTestSuite) TestFSMOpenSentSendInvalidOpen() {
 	}
 	e := <-s.events
 	assert.IsType(s.T(), &EventNeighborErr{}, e)
+}
+
+func (s *fsmTestSuite) TestFSMOpenConfirmDisable() {
+	s.advanceToOpenConfirmState()
+}
+
+func (s *fsmTestSuite) TestFSMOpenConfirmReaderErr() {
+	s.advanceToOpenConfirmState()
+	s.sendInvalidMsgExpectNeighborErr()
+}
+
+func (s *fsmTestSuite) TestFSMOpenConfirmHoldTimerExpire() {
+	s.advanceToOpenConfirmState()
+	time.Sleep(time.Second * 3)
+	e := <-s.events
+	assert.IsType(s.T(), &EventNeighborHoldTimerExpired{}, e)
 }
 
 // advance to established state then cleanup
