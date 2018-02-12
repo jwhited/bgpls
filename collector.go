@@ -98,9 +98,6 @@ func (c *standardCollector) AddNeighbor(config *NeighborConfig) error {
 	n := newNeighbor(c.config.ASN, config, c.events)
 	c.neighbors[config.Address.String()] = n
 
-	event := newEventNeighborAdded(config)
-	c.events <- event
-
 	return nil
 }
 
@@ -133,11 +130,8 @@ func (c *standardCollector) DeleteNeighbor(address net.IP) error {
 		return errors.New("neighbor does not exist")
 	}
 
-	n.shut()
+	n.terminate()
 	delete(c.neighbors, address.String())
-
-	event := newEventNeighborRemoved(n.config())
-	c.events <- event
 
 	return nil
 }
@@ -155,7 +149,7 @@ func (c *standardCollector) Stop() {
 		wg.Add(1)
 		n := n
 		go func() {
-			n.shut()
+			n.terminate()
 			wg.Done()
 		}()
 	}

@@ -8,8 +8,6 @@ import (
 	"strconv"
 	"sync"
 	"time"
-
-	"github.com/sirupsen/logrus"
 )
 
 // FSMState describes the state of a neighbor's fsm
@@ -52,34 +50,41 @@ var (
 )
 
 const (
+	// The exact value of the ConnectRetryTimer is a local matter, but it
+	// SHOULD be sufficiently large to allow TCP initialization.
 	connectRetryTime = time.Second * 5
-	loggerErrorField = "error"
 )
 
 type fsm interface {
-	state() FSMState
-	shut()
+	idle() FSMState
+	connect() FSMState
+	openSent() FSMState
+	openConfirm() FSMState
+	established() FSMState
+	terminate()
 }
 
 type standardFSM struct {
-	port              int
-	events            chan Event
-	disable           chan interface{}
-	neighborConfig    *NeighborConfig
-	localASN          uint32
-	logger            *logrus.Entry
-	conn              net.Conn
-	readerErr         chan error
-	closeReader       chan struct{}
-	readerClosed      chan struct{}
-	msgCh             chan Message
-	s                 FSMState
-	keepAliveTime     time.Duration
-	keepAliveTimer    *time.Timer
-	holdTime          time.Duration
-	holdTimer         *time.Timer
-	connectRetryTimer *time.Timer
-	*sync.RWMutex
+	port               int
+	events             chan Event
+	disable            chan interface{}
+	neighborConfig     *NeighborConfig
+	localASN           uint32
+	conn               net.Conn
+	readerErr          chan error
+	closeReader        chan struct{}
+	readerClosed       chan struct{}
+	msgCh              chan Message
+	keepAliveTime      time.Duration
+	keepAliveTimer     *time.Timer
+	holdTime           time.Duration
+	holdTimer          *time.Timer
+	connectRetryTimer  *time.Timer
+	running            bool
+	outboundConnErr    chan error
+	outboundConn       chan net.Conn
+	cancelOutboundDial context.CancelFunc
+	*sync.Mutex
 }
 
 func newFSM(c *NeighborConfig, events chan Event, localASN uint32, port int) fsm {
@@ -89,49 +94,73 @@ func newFSM(c *NeighborConfig, events chan Event, localASN uint32, port int) fsm
 		disable:           make(chan interface{}),
 		neighborConfig:    c,
 		localASN:          localASN,
-		logger:            logrus.WithField("neighbor", c.Address.String()),
-		s:                 IdleState,
 		keepAliveTime:     time.Duration(int64(c.HoldTime) / 3).Truncate(time.Second),
 		keepAliveTimer:    time.NewTimer(0),
 		holdTime:          c.HoldTime,
 		holdTimer:         time.NewTimer(0),
 		connectRetryTimer: time.NewTimer(0),
-		RWMutex:           &sync.RWMutex{},
+		Mutex:             &sync.Mutex{},
 	}
 
-	<-f.keepAliveTimer.C
-	<-f.holdTimer.C
-	<-f.connectRetryTimer.C
+	// drain all timers so they can be reset
+	drainTimers(f.keepAliveTimer, f.holdTimer, f.connectRetryTimer)
 
+	f.running = true
 	go f.loop()
 
 	return f
 }
 
-func (f *standardFSM) shut() {
-	f.RLock()
-	if f.s == DisabledState {
-		f.RUnlock()
+func (f *standardFSM) terminate() {
+	f.Lock()
+	defer f.Unlock()
+	if !f.running {
 		return
 	}
-	f.RUnlock()
 
 	f.disable <- nil
 	<-f.disable
+	f.running = false
 }
 
-func (f *standardFSM) transitionAndPanicOnErr(state FSMState) {
-	err := f.transition(state)
-	if err != nil {
-		f.logger.WithField(loggerErrorField, err).Panic("bug in FSM state transition")
-	}
+func (f *standardFSM) dialNeighbor() {
+	dialer := &net.Dialer{}
+	ctx, cancel := context.WithCancel(context.Background())
+	f.cancelOutboundDial = cancel
+
+	go func() {
+		conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(f.neighborConfig.Address.String(), strconv.Itoa(f.port)))
+		if err != nil {
+			f.outboundConnErr <- err
+			return
+		}
+
+		f.outboundConn <- conn
+	}()
 }
 
 func (f *standardFSM) idle() FSMState {
+	// initializes all BGP resources for the peer connection
+	f.readerErr = make(chan error)
+	f.closeReader = make(chan struct{})
+	f.readerClosed = make(chan struct{})
+	f.msgCh = make(chan Message)
+	f.outboundConnErr = make(chan error)
+	f.outboundConn = make(chan net.Conn)
+
+	// starts the ConnectRetryTimer with the initial value
+	f.connectRetryTimer.Reset(connectRetryTime)
+
+	// initiates a TCP connection to the other BGP peer
+	f.dialNeighbor()
+
+	// changes its state to Connect
 	return ConnectState
 }
 
-func (f *standardFSM) cleanupConn() {
+// cleanupConnAndReader closes the connection,
+// the reader close signal channel, and the messages channel
+func (f *standardFSM) cleanupConnAndReader() {
 	f.conn.Close()
 	close(f.closeReader)
 	<-f.readerClosed
@@ -139,143 +168,164 @@ func (f *standardFSM) cleanupConn() {
 }
 
 func (f *standardFSM) connect() FSMState {
-	f.readerErr = make(chan error)
-	f.closeReader = make(chan struct{})
-	f.readerClosed = make(chan struct{})
-	f.msgCh = make(chan Message)
-	dialer := &net.Dialer{}
-	ctx, cancel := context.WithCancel(context.Background())
-	connectErrorChan := make(chan error)
-	connChan := make(chan net.Conn)
-	f.connectRetryTimer.Reset(connectRetryTime)
-
-	go func() {
-		conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(f.neighborConfig.Address.String(), strconv.Itoa(f.port)))
-		if err != nil {
-			connectErrorChan <- err
-			return
-		}
-
-		connChan <- conn
-	}()
-
-	select {
-	case <-f.disable:
-		cancel()
-		return DisabledState
-	case <-f.connectRetryTimer.C:
-		cancel()
+Loop:
+	for {
 		select {
-		case conn := <-connChan:
-			f.conn = conn
-			go f.read()
-		case <-connectErrorChan:
-			return ConnectState
-		}
-	case err := <-connectErrorChan:
-		cancel()
-
-		event := newEventNeighborErr(f.neighborConfig, fmt.Errorf("error connecting to neighbor: %v", err))
-		select {
-		case f.events <- event:
 		case <-f.disable:
-			if !f.connectRetryTimer.Stop() {
-				<-f.connectRetryTimer.C
+			drainTimers(f.connectRetryTimer)
+			// drain the dialer and transition to DisabledState
+			f.cancelOutboundDial()
+			select {
+			case <-f.outboundConn:
+			case <-f.outboundConnErr:
 			}
 			return DisabledState
+		case <-f.connectRetryTimer.C:
+			/*
+				In response to the ConnectRetryTimer_Expires event (Event 9), the
+				local system:
+				  - drops the TCP connection,
+				  - restarts the ConnectRetryTimer,
+				  - stops the DelayOpenTimer and resets the timer to zero,
+				  - initiates a TCP connection to the other BGP peer,
+				  - continues to listen for a connection that may be initiated by
+				    the remote BGP peer, and
+				  - stays in the Connect state.
+			*/
+			f.cancelOutboundDial()
+			// canceling races with the dialer so it must be drained
+			select {
+			case conn := <-f.outboundConn:
+				f.conn = conn
+				go f.read()
+				break Loop
+			case <-f.outboundConnErr:
+			}
+			// timer already drained
+			f.connectRetryTimer.Reset(connectRetryTime)
+			f.dialNeighbor()
+		case err := <-f.outboundConnErr:
+			/*
+				If the TCP connection fails (Event 18), the local system checks
+				the DelayOpenTimer.  If the DelayOpenTimer is running, the local
+				system:
+				  - restarts the ConnectRetryTimer with the initial value,
+				  - stops the DelayOpenTimer and resets its value to zero,
+				  - continues to listen for a connection that may be initiated by
+				    the remote BGP peer, and
+				  - changes its state to Active.
+			*/
+			drainTimers(f.connectRetryTimer)
+			next := f.handleErr(fmt.Errorf("error connecting to neighbor: %v", err), ActiveState)
+			if next != DisabledState {
+				f.connectRetryTimer.Reset(connectRetryTime)
+			}
+			return next
+		case conn := <-f.outboundConn:
+			/*
+				If the TCP connection succeeds (Event 16 or Event 17), the local
+				system checks the DelayOpen attribute prior to processing.
+				...
+				If the DelayOpen attribute is set to FALSE, the local system:
+				  - stops the ConnectRetryTimer (if running) and sets the
+				    ConnectRetryTimer to zero,
+				  - completes BGP initialization
+				  - sends an OPEN message to its peer,
+				  - sets the HoldTimer to a large value, and
+				  - changes its state to OpenSent.
+			*/
+			drainTimers(f.connectRetryTimer)
+			f.conn = conn
+			go f.read()
+			break Loop
 		}
-
-		if !f.connectRetryTimer.Stop() {
-			<-f.connectRetryTimer.C
-		}
-		return ActiveState
-	case conn := <-connChan:
-		cancel()
-		if !f.connectRetryTimer.Stop() {
-			<-f.connectRetryTimer.C
-		}
-		f.conn = conn
-		go f.read()
 	}
 
 	o, err := newOpenMessage(f.localASN, f.holdTime, f.neighborConfig.Address)
 	if err != nil {
-		event := newEventNeighborErr(f.neighborConfig, fmt.Errorf("error creating open message: %v", err))
-		select {
-		case f.events <- event:
-		case <-f.disable:
-			f.cleanupConn()
-			return DisabledState
-		}
-
-		f.cleanupConn()
-		return IdleState
+		f.cleanupConnAndReader()
+		return f.handleErr(fmt.Errorf("error creating open message: %v", err), IdleState)
 	}
 	b, err := o.serialize()
 	if err != nil {
-		f.logger.WithField(loggerErrorField, err).Panic("bug serializing open message")
+		panic("bug serializing open message")
 	}
 
 	_, err = f.conn.Write(b)
 	if err != nil {
-		event := newEventNeighborErr(f.neighborConfig, fmt.Errorf("error sending open message: %v", err))
-		select {
-		case f.events <- event:
-		case <-f.disable:
-			f.cleanupConn()
-			return DisabledState
-		}
-
-		f.cleanupConn()
-		return ConnectState
+		f.cleanupConnAndReader()
+		return f.handleErr(fmt.Errorf("error sending open message: %v", err), IdleState)
 	}
+
+	// A HoldTimer value of 4 minutes is suggested.
+	f.holdTimer.Reset(time.Minute * 4)
 
 	return OpenSentState
 }
 
 func (f *standardFSM) active() FSMState {
-	f.connectRetryTimer.Reset(connectRetryTime)
-
 	select {
 	case <-f.disable:
+		drainTimers(f.connectRetryTimer)
 		return DisabledState
 	case <-f.connectRetryTimer.C:
+		/*
+			In response to a ConnectRetryTimer_Expires event (Event 9), the
+			local system:
+				- restarts the ConnectRetryTimer (with initial value),
+				- initiates a TCP connection to the other BGP peer,
+				- continues to listen for a TCP connection that may be initiated
+					by a remote BGP peer, and
+				- changes its state to Connect.
+		*/
+		f.connectRetryTimer.Reset(connectRetryTime)
+		f.dialNeighbor()
 		return ConnectState
 	}
 }
 
+// sendEvent sends the provided event on the events channel and
+// returns the provided FSMState unless a disable signal is received
+// in which case DisabledState is returned
+func (f *standardFSM) sendEvent(e Event, nextState FSMState) FSMState {
+	select {
+	case f.events <- e:
+		return nextState
+	case <-f.disable:
+		return DisabledState
+	}
+}
+
+// handlerErr checks the provided err to see if a notification can be unwrapped
+// and if so, sends it to the neighbor.
+//
+// The provided FSMState is returned unless a disable signal is received while
+// trying to send on the events channel in which case DisabledState is returned.
 func (f *standardFSM) handleErr(err error, nextState FSMState) FSMState {
 	if err, ok := err.(*errWithNotification); ok {
 		f.sendNotification(err.code, err.subcode, err.data)
 	}
 
-	event := newEventNeighborErr(f.neighborConfig, err)
-	select {
-	case f.events <- event:
-	case <-f.disable:
-		f.drainHoldTimer()
-		f.cleanupConn()
-		return DisabledState
-	}
-
-	f.drainHoldTimer()
-	f.cleanupConn()
-	return nextState
+	return f.sendEvent(newEventNeighborErr(f.neighborConfig, err), nextState)
 }
 
-func (f *standardFSM) handleHoldTimerExpired(nextState FSMState) FSMState {
+func (f *standardFSM) handleHoldTimerExpired() FSMState {
+	/*
+	   If the HoldTimer_Expires (Event 10), the local system:
+	   	- sends a NOTIFICATION message with the error code Hold Timer
+	   		Expired,
+	   	- sets the ConnectRetryTimer to zero,
+	   	- releases all BGP resources,
+	   	- drops the TCP connection,
+	   	- increments the ConnectRetryCounter,
+	   	- (optionally) performs peer oscillation damping if the
+	   		DampPeerOscillations attribute is set to TRUE, and
+	   	- changes its state to Idle.
+	*/
 	f.sendHoldTimerExpired()
+	f.cleanupConnAndReader()
 
-	event := newEventNeighborHoldTimerExpired(f.neighborConfig)
-	select {
-	case f.events <- event:
-	case <-f.disable:
-		f.cleanupConn()
-		return DisabledState
-	}
-
-	f.cleanupConn()
-	return nextState
+	return f.sendEvent(newEventNeighborHoldTimerExpired(f.neighborConfig), IdleState)
 }
 
 func (f *standardFSM) read() {
@@ -323,42 +373,55 @@ func (f *standardFSM) sendHoldTimerExpired() error {
 }
 
 func (f *standardFSM) openSent() FSMState {
-	// should already be drained if previously set
-	f.holdTimer.Reset(f.holdTime)
-
 	select {
 	case <-f.disable:
 		f.sendCease()
-		f.drainHoldTimer()
-		f.cleanupConn()
+		drainTimers(f.holdTimer)
+		f.cleanupConnAndReader()
 		return DisabledState
 	case err := <-f.readerErr:
-		return f.handleErr(err, ActiveState)
+		/*
+			If a TcpConnectionFails event (Event 18) is received, the local
+			system:
+				- closes the BGP connection,
+				- restarts the ConnectRetryTimer,
+				- continues to listen for a connection that may be initiated by
+					the remote BGP peer, and
+				- changes its state to Active.
+		*/
+		var next FSMState
+		// check if err is connection related or not - Active vs Idle
+		_, isOpError := err.(*net.OpError)
+		if isOpError {
+			next = f.handleErr(err, ActiveState)
+			if next != DisabledState {
+				f.connectRetryTimer.Reset(connectRetryTime)
+			}
+		} else {
+			next = f.handleErr(err, IdleState)
+		}
+		drainTimers(f.holdTimer)
+		f.cleanupConnAndReader()
+		return next
 	case <-f.holdTimer.C:
-		return f.handleHoldTimerExpired(IdleState)
+		return f.handleHoldTimerExpired()
 	case m := <-f.msgCh:
 		open, isOpen := m.(*openMessage)
 		if !isOpen {
 			notif, isNotif := m.(*NotificationMessage)
 			if isNotif {
-				event := newEventNeighborNotificationReceived(f.neighborConfig, notif)
-				select {
-				case f.events <- event:
-				case <-f.disable:
-					f.drainHoldTimer()
-					f.cleanupConn()
-					return DisabledState
-				}
+				drainTimers(f.holdTimer)
+				f.cleanupConnAndReader()
+				return f.sendEvent(newEventNeighborNotificationReceived(f.neighborConfig, notif), IdleState)
 			}
-
-			f.drainHoldTimer()
-			f.cleanupConn()
-			return IdleState
 		}
 
 		err := validateOpenMessage(open, f.neighborConfig.ASN)
 		if err != nil {
-			return f.handleErr(err, IdleState)
+			next := f.handleErr(err, IdleState)
+			drainTimers(f.holdTimer)
+			f.cleanupConnAndReader()
+			return next
 		}
 
 		if float64(open.holdTime) < f.holdTime.Seconds() {
@@ -368,7 +431,10 @@ func (f *standardFSM) openSent() FSMState {
 
 		err = f.sendKeepAlive()
 		if err != nil {
-			return f.handleErr(err, IdleState)
+			next := f.handleErr(err, IdleState)
+			drainTimers(f.holdTimer)
+			f.cleanupConnAndReader()
+			return next
 		}
 
 		f.drainAndResetHoldTimer()
@@ -380,7 +446,7 @@ func (f *standardFSM) sendKeepAlive() error {
 	ka := &keepAliveMessage{}
 	b, err := ka.serialize()
 	if err != nil {
-		f.logger.WithField(loggerErrorField, err).Panic("bug serializing keepalive message")
+		panic("bug serializing keepalive message")
 	}
 	_, err = f.conn.Write(b)
 	return err
@@ -391,17 +457,23 @@ func (f *standardFSM) openConfirm() FSMState {
 		select {
 		case <-f.disable:
 			f.sendCease()
-			f.drainHoldTimer()
-			f.cleanupConn()
+			drainTimers(f.holdTimer)
+			f.cleanupConnAndReader()
 			return DisabledState
 		case err := <-f.readerErr:
-			return f.handleErr(err, IdleState)
+			next := f.handleErr(err, IdleState)
+			drainTimers(f.holdTimer)
+			f.cleanupConnAndReader()
+			return next
 		case <-f.holdTimer.C:
-			return f.handleHoldTimerExpired(IdleState)
+			return f.handleHoldTimerExpired()
 		case m := <-f.msgCh:
 			_, isKeepAlive := m.(*keepAliveMessage)
 			if !isKeepAlive {
-				return f.handleErr(fmt.Errorf("message received in openConfirm state is not a keepalive, type: %s", m.MessageType()), IdleState)
+				next := f.handleErr(fmt.Errorf("message received in openConfirm state is not a keepalive, type: %s", m.MessageType()), IdleState)
+				drainTimers(f.holdTimer)
+				f.cleanupConnAndReader()
+				return next
 			}
 
 			f.drainAndResetHoldTimer()
@@ -417,17 +489,24 @@ func (f *standardFSM) established() FSMState {
 		select {
 		case <-f.disable:
 			f.sendCease()
-			f.drainHoldTimer()
-			f.cleanupConn()
+			drainTimers(f.keepAliveTimer, f.holdTimer)
+			f.cleanupConnAndReader()
 			return DisabledState
 		case err := <-f.readerErr:
-			return f.handleErr(err, IdleState)
+			next := f.handleErr(err, IdleState)
+			drainTimers(f.keepAliveTimer, f.holdTimer)
+			f.cleanupConnAndReader()
+			return next
 		case <-f.holdTimer.C:
-			return f.handleHoldTimerExpired(IdleState)
+			drainTimers(f.keepAliveTimer)
+			return f.handleHoldTimerExpired()
 		case <-f.keepAliveTimer.C:
 			err := f.sendKeepAlive()
 			if err != nil {
-				return f.handleErr(err, IdleState)
+				next := f.handleErr(err, IdleState)
+				drainTimers(f.holdTimer)
+				f.cleanupConnAndReader()
+				return next
 			}
 			// does not need to be drained
 			f.keepAliveTimer.Reset(f.keepAliveTime)
@@ -437,92 +516,76 @@ func (f *standardFSM) established() FSMState {
 				f.drainAndResetHoldTimer()
 			case *UpdateMessage:
 				f.drainAndResetHoldTimer()
-				event := newEventNeighborUpdateReceived(f.neighborConfig, m)
-
-				select {
-				case f.events <- event:
-				case <-f.disable:
+				next := f.sendEvent(newEventNeighborUpdateReceived(f.neighborConfig, m), EstablishedState)
+				if next == DisabledState {
 					f.sendCease()
-					f.drainHoldTimer()
-					f.cleanupConn()
-					return DisabledState
+					drainTimers(f.keepAliveTimer, f.holdTimer)
+					f.cleanupConnAndReader()
+					return next
 				}
 			case *NotificationMessage:
-				event := newEventNeighborNotificationReceived(f.neighborConfig, m)
-				select {
-				case f.events <- event:
-				case <-f.disable:
-					f.drainHoldTimer()
-					f.cleanupConn()
-					return DisabledState
-				}
-
-				f.drainHoldTimer()
-				f.cleanupConn()
-				return IdleState
+				drainTimers(f.keepAliveTimer, f.holdTimer)
+				f.cleanupConnAndReader()
+				return f.sendEvent(newEventNeighborNotificationReceived(f.neighborConfig, m), IdleState)
 			case *openMessage:
-				event := newEventNeighborErr(f.neighborConfig, errors.New("open message received while in established state"))
-				select {
-				case f.events <- event:
-				case <-f.disable:
-					f.drainHoldTimer()
-					f.cleanupConn()
-					return DisabledState
-				}
-
 				openType := make([]byte, 1)
 				openType[0] = uint8(OpenMessageType)
 				f.sendNotification(NotifErrCodeMessageHeader, NotifErrSubcodeBadType, openType)
-				f.drainHoldTimer()
-				f.cleanupConn()
-				return IdleState
+				drainTimers(f.holdTimer)
+				f.cleanupConnAndReader()
+
+				return f.sendEvent(newEventNeighborErr(f.neighborConfig, errors.New("open message received while in established state")), IdleState)
 			}
 		}
 	}
 }
 
 func (f *standardFSM) loop() {
-	for {
-		state := f.state()
+	var current FSMState
+	next := IdleState
 
-		if state != DisabledState {
-			event := newEventNeighborStateTransition(f.neighborConfig, state)
-			select {
-			case f.events <- event:
-			case <-f.disable:
-				f.disable <- nil
-				return
-			}
+	for {
+		if next != current && next != DisabledState {
+			next = f.sendEvent(newEventNeighborStateTransition(f.neighborConfig, next), next)
 		}
 
-		switch state {
+		current = next
+
+		switch current {
 		case DisabledState:
 			f.disable <- nil
 			return
 		case IdleState:
-			f.transitionAndPanicOnErr(f.idle())
+			next = f.idle()
 		case ConnectState:
-			f.transitionAndPanicOnErr(f.connect())
+			next = f.connect()
 		case ActiveState:
-			f.transitionAndPanicOnErr(f.active())
+			next = f.active()
 		case OpenSentState:
-			f.transitionAndPanicOnErr(f.openSent())
+			next = f.openSent()
 		case OpenConfirmState:
-			f.transitionAndPanicOnErr(f.openConfirm())
+			next = f.openConfirm()
 		case EstablishedState:
-			f.transitionAndPanicOnErr(f.established())
+			next = f.established()
+		}
+
+		err := validTransition(current, next)
+		if err != nil {
+			panic(fmt.Sprintf("invalid state transition for neighbor:%s %s to %s", f.neighborConfig.Address, current, next))
 		}
 	}
 }
 
-func (f *standardFSM) drainHoldTimer() {
-	if !f.holdTimer.Stop() {
-		<-f.holdTimer.C
+func drainTimers(timers ...*time.Timer) {
+	for _, t := range timers {
+		if !t.Stop() {
+			<-t.C
+		}
 	}
 }
 
 func (f *standardFSM) drainAndResetHoldTimer() {
-	f.drainHoldTimer()
+	drainTimers(f.holdTimer)
 	f.holdTimer.Reset(f.holdTime)
 }
 
@@ -546,51 +609,33 @@ func (f *standardFSM) sendNotification(code NotifErrCode, subcode NotifErrSubcod
 	return err
 }
 
-func (f *standardFSM) state() FSMState {
-	f.RLock()
-	defer f.RUnlock()
-	return f.s
-}
-
-func (f *standardFSM) transition(state FSMState) error {
-	f.Lock()
-	defer f.Unlock()
-
-	switch state {
+func validTransition(current, next FSMState) error {
+	switch next {
 	case DisabledState:
-		f.s = DisabledState
 		return nil
 	case IdleState:
-		f.s = IdleState
 		return nil
 	case ConnectState:
-		if f.s == IdleState || f.s == ConnectState || f.s == ActiveState {
-			f.s = ConnectState
+		if current == IdleState || current == ActiveState {
 			return nil
 		}
 	case ActiveState:
-		if f.s == ConnectState || f.s == ActiveState || f.s == OpenSentState {
-			f.s = ActiveState
+		if current == ConnectState || current == OpenSentState {
 			return nil
 		}
 	case OpenSentState:
-		if f.s == ConnectState || f.s == ActiveState {
-			f.s = OpenSentState
+		if current == ConnectState || current == ActiveState {
 			return nil
 		}
 	case OpenConfirmState:
-		if f.s == OpenSentState || f.s == OpenConfirmState {
-			f.s = OpenConfirmState
+		if current == OpenSentState {
 			return nil
 		}
 	case EstablishedState:
-		if f.s == OpenConfirmState || f.s == EstablishedState {
-			f.s = EstablishedState
+		if current == OpenConfirmState {
 			return nil
 		}
-	default:
-		return errors.New("invalid state")
 	}
 
-	return errInvalidStateTransition
+	return errors.New("invalid state transition")
 }

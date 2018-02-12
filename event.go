@@ -21,8 +21,6 @@ type EventType int
 // EventType values
 const (
 	_ EventType = iota
-	EventTypeNeighborAdded
-	EventTypeNeighborRemoved
 	EventTypeNeighborErr
 	EventTypeNeighborHoldTimerExpired
 	EventTypeNeighborStateTransition
@@ -32,10 +30,6 @@ const (
 
 func (e EventType) String() string {
 	switch e {
-	case EventTypeNeighborAdded:
-		return "neighbor added to collector"
-	case EventTypeNeighborRemoved:
-		return "neighbor removed from collector"
 	case EventTypeNeighborErr:
 		return "neighbor error"
 	case EventTypeNeighborHoldTimerExpired:
@@ -65,44 +59,6 @@ func (b *BaseEvent) Timestamp() time.Time {
 // Neighbor returns the NeighborConfig associated with the event
 func (b *BaseEvent) Neighbor() *NeighborConfig {
 	return b.n
-}
-
-// EventNeighborAdded is generated when a neighbor is added to the Collector
-type EventNeighborAdded struct {
-	BaseEvent
-}
-
-// Type returns the appropriate EventType for EventNeighborAdded
-func (e *EventNeighborAdded) Type() EventType {
-	return EventTypeNeighborAdded
-}
-
-func newEventNeighborAdded(c *NeighborConfig) Event {
-	return &EventNeighborAdded{
-		BaseEvent: BaseEvent{
-			t: time.Now(),
-			n: c,
-		},
-	}
-}
-
-// EventNeighborRemoved is generated when a neighbor is removed from the Collector
-type EventNeighborRemoved struct {
-	BaseEvent
-}
-
-// Type returns the appropriate EventType for EventNeighborRemoved
-func (e *EventNeighborRemoved) Type() EventType {
-	return EventTypeNeighborRemoved
-}
-
-func newEventNeighborRemoved(c *NeighborConfig) Event {
-	return &EventNeighborRemoved{
-		BaseEvent: BaseEvent{
-			t: time.Now(),
-			n: c,
-		},
-	}
 }
 
 // EventNeighborErr is generated when a neighbor encounters an error

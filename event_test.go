@@ -21,11 +21,9 @@ func TestEvent(t *testing.T) {
 		t     EventType
 		s     string
 	}{
-		{newEventNeighborAdded(conf), EventTypeNeighborAdded, "neighbor added to collector"},
 		{newEventNeighborErr(conf, errors.New("test")), EventTypeNeighborErr, "neighbor error"},
 		{newEventNeighborHoldTimerExpired(conf), EventTypeNeighborHoldTimerExpired, "neighbor hold timer expired"},
 		{newEventNeighborNotificationReceived(conf, &NotificationMessage{}), EventTypeNeighborNotificationReceived, "received notification message from neighbor"},
-		{newEventNeighborRemoved(conf), EventTypeNeighborRemoved, "neighbor removed from collector"},
 		{newEventNeighborStateTransition(conf, IdleState), EventTypeNeighborStateTransition, "neighbor state changed"},
 		{newEventNeighborUpdateReceived(conf, &UpdateMessage{}), EventTypeNeighborUpdateReceived, "received update message from neighbor"},
 	}
