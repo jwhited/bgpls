@@ -83,19 +83,19 @@ func (s *fsmTestSuite) sendOpen() error {
 func (s *fsmTestSuite) advanceToOpenSentState() {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		s.T().Fatal(err)
+		assert.FailNow(s.T(), err.Error())
 	}
 
 	s.ln = ln
 
 	split := strings.Split(s.ln.Addr().String(), ":")
 	if len(split) != 2 {
-		s.T().Fatal("unable to split listener address string")
+		assert.FailNow(s.T(), "unable to split listener address string")
 	}
 
 	i, err := strconv.Atoi(split[1])
 	if err != nil {
-		s.T().Fatal("unexpected split on listener address string")
+		assert.FailNow(s.T(), "unexpected split on listener address string")
 	}
 
 	s.neighborConfig = &NeighborConfig{
@@ -107,43 +107,24 @@ func (s *fsmTestSuite) advanceToOpenSentState() {
 	s.events = make(chan Event)
 	s.fsm = newFSM(s.neighborConfig, s.events, 64512, i)
 
-	for i := 0; i < 2; i++ {
-		evt := <-s.events
-		e, ok := evt.(*EventNeighborStateTransition)
-		if ok {
-			switch i {
-			case 0:
-				assert.Equal(s.T(), e.State, IdleState)
-			case 1:
-				assert.Equal(s.T(), e.State, ConnectState)
-			}
-		} else {
-			s.T().Fatalf("not a state transition event: %s", evt.Type())
-		}
-	}
+	s.failNowIfNotStateTransition(IdleState)
+	s.failNowIfNotStateTransition(ConnectState)
 
 	conn, err := ln.Accept()
 	if err != nil {
-		s.T().Fatal(err)
+		assert.FailNow(s.T(), err.Error())
 	}
 
-	evt := <-s.events
-	e, ok := evt.(*EventNeighborStateTransition)
-	if !ok {
-		s.T().Fatalf("not a state transition event: %s", evt.Type())
-	}
-	if !assert.Equal(s.T(), e.State, OpenSentState) {
-		s.T().Fatal("wrong state")
-	}
+	s.failNowIfNotStateTransition(OpenSentState)
 
 	s.conn = conn
 
 	m, err := s.readMessagesFromConn()
 	if err != nil {
-		s.T().Fatal(err)
+		assert.FailNow(s.T(), err.Error())
 	}
 	if !assert.Equal(s.T(), len(m), 1) {
-		s.T().Fatal("invalid number of messages from neighbor")
+		assert.FailNow(s.T(), "invalid number of messages")
 	}
 }
 
@@ -152,20 +133,30 @@ func (s *fsmTestSuite) advanceToOpenConfirmState() {
 
 	err := s.sendOpen()
 	if err != nil {
-		s.T().Fatal(err)
+		assert.FailNow(s.T(), err.Error())
 	}
 
-	_, err = s.readMessagesFromConn()
+	m, err := s.readMessagesFromConn()
 	if err != nil {
-		s.T().Fatal(err)
+		assert.FailNow(s.T(), err.Error())
 	}
 
-	evt := <-s.events
-	e, ok := evt.(*EventNeighborStateTransition)
-	if ok {
-		assert.Equal(s.T(), e.State, OpenConfirmState)
+	if assert.Len(s.T(), m, 1) {
+		assert.IsType(s.T(), m[0], &keepAliveMessage{})
+	}
+
+	s.failNowIfNotStateTransition(OpenConfirmState)
+}
+
+func (s *fsmTestSuite) failNowIfNotStateTransition(state FSMState) {
+	e := <-s.events
+	if assert.IsType(s.T(), &EventNeighborStateTransition{}, e) {
+		f, _ := e.(*EventNeighborStateTransition)
+		if !assert.Equal(s.T(), f.State, state) {
+			assert.FailNow(s.T(), "unexpected state")
+		}
 	} else {
-		s.T().Fatalf("not a state transition event: %s", evt.Type())
+		assert.FailNow(s.T(), "unexpected event type")
 	}
 }
 
@@ -174,36 +165,21 @@ func (s *fsmTestSuite) advanceToEstablishedState() {
 
 	err := s.sendKeepalive()
 	if err != nil {
-		s.T().Fatal(err)
+		assert.FailNow(s.T(), err.Error())
 	}
 
-	m, err := s.readMessagesFromConn()
-	if err != nil {
-		s.T().Fatal(err)
-	}
-	if !assert.Equal(s.T(), len(m), 1) {
-		s.T().Fatal("invalid number of messages from neighbor")
-	}
-	assert.Equal(s.T(), m[0].MessageType(), KeepAliveMessageType)
-
-	evt := <-s.events
-	e, ok := evt.(*EventNeighborStateTransition)
-	if ok {
-		assert.Equal(s.T(), e.State, EstablishedState)
-	} else {
-		s.T().Fatalf("not a state transition event: %s", evt.Type())
-	}
+	s.failNowIfNotStateTransition(EstablishedState)
 }
 
 func (s *fsmTestSuite) sendInvalidMsgExpectNeighborErr() {
 	_, err := s.conn.Write([]byte{0})
 	if err != nil {
-		s.T().Fatal(err)
+		assert.FailNow(s.T(), err.Error())
 	}
 
 	m, err := s.readMessagesFromConn()
 	if err != nil {
-		s.T().Fatal(err)
+		assert.FailNow(s.T(), err.Error())
 	}
 	if assert.Len(s.T(), m, 1) {
 		assert.IsType(s.T(), &NotificationMessage{}, m[0])
@@ -218,70 +194,75 @@ func (s *fsmTestSuite) TestFSMOpenSentDisable() {
 	s.advanceToOpenSentState()
 }
 
-/*
 // advance to open sent state then send an invalid message
-// expect a notification and EventNeighborErr to be received
 func (s *fsmTestSuite) TestFSMOpenSentReaderErr() {
 	s.advanceToOpenSentState()
 	s.sendInvalidMsgExpectNeighborErr()
 }
 
 // advance to open sent state and wait for hold timer to expire
-// expect an EventNeighborHoldTimerExpired
 func (s *fsmTestSuite) TestFSMOpenSentHoldTimerExpired() {
+	longHoldTime = time.Second * 1
 	s.advanceToOpenSentState()
-	time.Sleep(time.Second * 3)
 	e := <-s.events
 	assert.IsType(s.T(), &EventNeighborHoldTimerExpired{}, e)
 }
 
-// advance to open sent state and send KA
-// expect an EventNeighborStateTransition
+// advance to open sent state and send KA instead of open message
 func (s *fsmTestSuite) TestFSMOpenSentSendKA() {
 	s.advanceToOpenSentState()
 	err := s.sendKeepalive()
 	if err != nil {
-		s.T().Fatal(err)
+		assert.FailNow(s.T(), err.Error())
 	}
 	e := <-s.events
-	assert.IsType(s.T(), &EventNeighborStateTransition{}, e)
+	assert.IsType(s.T(), &EventNeighborErr{}, e)
+	s.failNowIfNotStateTransition(IdleState)
 }
 
 // advance to open sent state and send notif
-// expect an EventNeighborNotificationReceived
 func (s *fsmTestSuite) TestFSMOpenSentSendNotif() {
 	s.advanceToOpenSentState()
 	n := &NotificationMessage{Code: NotifErrCodeUpdateMessage, Subcode: NotifErrSubcodeMalformedAttr}
 	b, err := n.serialize()
 	if err != nil {
-		s.T().Fatal(err)
+		assert.FailNow(s.T(), err.Error())
 	}
 	_, err = s.conn.Write(b)
 	if err != nil {
-		s.T().Fatal(err)
+		assert.FailNow(s.T(), err.Error())
 	}
 	e := <-s.events
-	assert.IsType(s.T(), &EventNeighborNotificationReceived{}, e)
+	if assert.IsType(s.T(), &EventNeighborNotificationReceived{}, e) {
+		f, _ := e.(*EventNeighborNotificationReceived)
+		assert.Equal(s.T(), f.Message, n)
+	}
+	s.failNowIfNotStateTransition(IdleState)
 }
 
 // advance to open sent state and send an invalid open message
-// expect an EventNeighborErr
 func (s *fsmTestSuite) TestFSMOpenSentSendInvalidOpen() {
 	s.advanceToOpenSentState()
 	o, err := newOpenMessage(12, time.Second*3, []byte{0, 0, 0, 0})
 	if err != nil {
-		s.T().Fatal(err)
+		assert.FailNow(s.T(), err.Error())
 	}
 	b, err := o.serialize()
 	if err != nil {
-		s.T().Fatal(err)
+		assert.FailNow(s.T(), err.Error())
 	}
 	_, err = s.conn.Write(b)
 	if err != nil {
-		s.T().Fatal(err)
+		assert.FailNow(s.T(), err.Error())
+	}
+	m, err := s.readMessagesFromConn()
+	assert.Nil(s.T(), err)
+	if assert.Len(s.T(), m, 1) {
+		assert.IsType(s.T(), m[0], &NotificationMessage{})
 	}
 	e := <-s.events
 	assert.IsType(s.T(), &EventNeighborErr{}, e)
+	s.failNowIfNotStateTransition(IdleState)
 }
 
 // advance to open confirm state then cleanup
@@ -290,19 +271,18 @@ func (s *fsmTestSuite) TestFSMOpenConfirmDisable() {
 }
 
 // advance to open confirm state then send an invalid message
-// expect a notification and EventNeighborErr to be received
 func (s *fsmTestSuite) TestFSMOpenConfirmReaderErr() {
 	s.advanceToOpenConfirmState()
 	s.sendInvalidMsgExpectNeighborErr()
+	s.failNowIfNotStateTransition(IdleState)
 }
 
 // advance to open confirm state and wait for hold timer to expire
-// expect an EventNeighborHoldTimerExpired
 func (s *fsmTestSuite) TestFSMOpenConfirmHoldTimerExpire() {
 	s.advanceToOpenConfirmState()
-	time.Sleep(time.Second * 3)
 	e := <-s.events
 	assert.IsType(s.T(), &EventNeighborHoldTimerExpired{}, e)
+	s.failNowIfNotStateTransition(IdleState)
 }
 
 // advance to established state then cleanup
@@ -311,28 +291,25 @@ func (s *fsmTestSuite) TestFSMEstablishedDisable() {
 }
 
 // advance to established state then send an invalid message
-// expect a notification and EventNeighborErr to be received
 func (s *fsmTestSuite) TestFSMEstablishedReaderErr() {
 	s.advanceToEstablishedState()
 	s.sendInvalidMsgExpectNeighborErr()
+	s.failNowIfNotStateTransition(IdleState)
 }
 
 // advance to established state and wait for hold timer to expire
-// expect an EventNeighborHoldTimerExpired
 func (s *fsmTestSuite) TestFSMEstablishedHoldTimerExpired() {
 	s.advanceToEstablishedState()
-	time.Sleep(time.Second * 3)
 	e := <-s.events
 	assert.IsType(s.T(), &EventNeighborHoldTimerExpired{}, e)
+	s.failNowIfNotStateTransition(IdleState)
 }
 
 // advance to established state and send a keepalive
 func (s *fsmTestSuite) TestFSMEstablishedSendKA() {
 	s.advanceToEstablishedState()
 	err := s.sendKeepalive()
-	if err != nil {
-		s.T().Fatal(err)
-	}
+	assert.Nil(s.T(), err)
 }
 
 // advance to established state and send an update message
@@ -347,11 +324,11 @@ func (s *fsmTestSuite) TestFSMEstablishedSendUpdate() {
 	}
 	b, err := u.serialize()
 	if err != nil {
-		s.T().Fatal(err)
+		assert.FailNow(s.T(), err.Error())
 	}
 	_, err = s.conn.Write(b)
 	if err != nil {
-		s.T().Fatal(err)
+		assert.FailNow(s.T(), err.Error())
 	}
 
 	e := <-s.events
@@ -370,11 +347,11 @@ func (s *fsmTestSuite) TestFSMEstablishedSendNotif() {
 	}
 	b, err := n.serialize()
 	if err != nil {
-		s.T().Fatal(err)
+		assert.FailNow(s.T(), err.Error())
 	}
 	_, err = s.conn.Write(b)
 	if err != nil {
-		s.T().Fatal(err)
+		assert.FailNow(s.T(), err.Error())
 	}
 
 	e := <-s.events
@@ -383,8 +360,8 @@ func (s *fsmTestSuite) TestFSMEstablishedSendNotif() {
 	}
 }
 
-// advance to established state and send a notification message
-// expect EventNeighborErr
+// advance to established state and send an open message
+// expect EventNeighborErr and EventNeighborStateTransition
 func (s *fsmTestSuite) TestFSMEstablishedSendOpen() {
 	s.advanceToEstablishedState()
 	err := s.sendOpen()
@@ -394,7 +371,8 @@ func (s *fsmTestSuite) TestFSMEstablishedSendOpen() {
 
 	e := <-s.events
 	assert.IsType(s.T(), &EventNeighborErr{}, e)
-}*/
+	s.failNowIfNotStateTransition(IdleState)
+}
 
 func TestFSM(t *testing.T) {
 	s := &fsmTestSuite{}
