@@ -49,6 +49,11 @@ var (
 	errInvalidStateTransition = errors.New("invalid state transition")
 )
 
+var (
+	// A HoldTimer value of 4 minutes is suggested.
+	longHoldTime = time.Minute * 4
+)
+
 const (
 	// The exact value of the ConnectRetryTimer is a local matter, but it
 	// SHOULD be sufficiently large to allow TCP initialization.
@@ -257,8 +262,7 @@ Loop:
 		return f.handleErr(fmt.Errorf("error sending open message: %v", err), IdleState)
 	}
 
-	// A HoldTimer value of 4 minutes is suggested.
-	f.holdTimer.Reset(time.Minute * 4)
+	f.holdTimer.Reset(longHoldTime)
 
 	return OpenSentState
 }
@@ -372,6 +376,15 @@ func (f *standardFSM) sendHoldTimerExpired() error {
 	return f.sendNotification(NotifErrCodeHoldTimerExpired, 0, nil)
 }
 
+// handleUnexpectedMessageType sends the appropriate notification message to the
+// neighbor and generates an EventNeighborErr
+func (f *standardFSM) handleUnexpectedMessageType(received MessageType, next FSMState) FSMState {
+	b := make([]byte, 1)
+	b[0] = uint8(received)
+	f.sendNotification(NotifErrCodeMessageHeader, NotifErrSubcodeBadType, b)
+	return f.sendEvent(newEventNeighborErr(f.neighborConfig, fmt.Errorf("unexpected message type: %s", received)), next)
+}
+
 func (f *standardFSM) openSent() FSMState {
 	select {
 	case <-f.disable:
@@ -408,12 +421,17 @@ func (f *standardFSM) openSent() FSMState {
 	case m := <-f.msgCh:
 		open, isOpen := m.(*openMessage)
 		if !isOpen {
+			var next FSMState
 			notif, isNotif := m.(*NotificationMessage)
 			if isNotif {
-				drainTimers(f.holdTimer)
-				f.cleanupConnAndReader()
-				return f.sendEvent(newEventNeighborNotificationReceived(f.neighborConfig, notif), IdleState)
+				next = f.sendEvent(newEventNeighborNotificationReceived(f.neighborConfig, notif), IdleState)
+			} else {
+				next = f.handleUnexpectedMessageType(m.MessageType(), IdleState)
 			}
+
+			drainTimers(f.holdTimer)
+			f.cleanupConnAndReader()
+			return next
 		}
 
 		err := validateOpenMessage(open, f.neighborConfig.ASN)
@@ -528,13 +546,10 @@ func (f *standardFSM) established() FSMState {
 				f.cleanupConnAndReader()
 				return f.sendEvent(newEventNeighborNotificationReceived(f.neighborConfig, m), IdleState)
 			case *openMessage:
-				openType := make([]byte, 1)
-				openType[0] = uint8(OpenMessageType)
-				f.sendNotification(NotifErrCodeMessageHeader, NotifErrSubcodeBadType, openType)
+				next := f.handleUnexpectedMessageType(m.MessageType(), IdleState)
 				drainTimers(f.holdTimer)
 				f.cleanupConnAndReader()
-
-				return f.sendEvent(newEventNeighborErr(f.neighborConfig, errors.New("open message received while in established state")), IdleState)
+				return next
 			}
 		}
 	}
@@ -545,7 +560,7 @@ func (f *standardFSM) loop() {
 	next := IdleState
 
 	for {
-		if next != current && next != DisabledState {
+		if next != DisabledState {
 			next = f.sendEvent(newEventNeighborStateTransition(f.neighborConfig, next), next)
 		}
 
