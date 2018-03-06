@@ -38,56 +38,16 @@ func ExampleCollector() {
 
 	for {
 		event := <-eventsChan
-
 		// all Event types can be found in event.go (EventNeighbor**)
 		switch e := event.(type) {
 		case *bgpls.EventNeighborErr:
 			log.Printf("neighbor %s, err: %v", e.Neighbor().Address, e.Err)
 		case *bgpls.EventNeighborStateTransition:
 			log.Printf("neighbor %s, state transition: %v", e.Neighbor().Address, e.State)
+		case *bgpls.EventNeighborNotificationReceived:
+			log.Printf("neighbor %s notification message code: %v", e.Neighbor().Address, e.Message.Code)
 		case *bgpls.EventNeighborUpdateReceived:
-			var addr net.IP
-			var maxLinkBW float32
-			var maxReservableLinkBW float32
-			var reservedBW float32
-
 			log.Printf("neighbor %s update message", e.Neighbor().Address)
-			// extracting link address and bandwidth reservation (assuming mpls-te links) attributes from the update message
-			for _, a := range e.Message.PathAttrs {
-				switch b := a.(type) {
-				case *bgpls.PathAttrMpReach:
-					for _, n := range b.Nlri {
-						switch o := n.(type) {
-						case *bgpls.LinkStateNlriLink:
-							for _, g := range o.LinkDescriptors {
-								switch h := g.(type) {
-								case *bgpls.LinkDescriptorIPv4InterfaceAddress:
-									addr = h.Address
-									break
-								}
-							}
-						}
-					}
-				case *bgpls.PathAttrLinkState:
-					for _, c := range b.LinkAttrs {
-						switch d := c.(type) {
-						case *bgpls.LinkAttrMaxLinkBandwidth:
-							maxLinkBW = d.BytesPerSecond
-						case *bgpls.LinkAttrMaxReservableLinkBandwidth:
-							maxReservableLinkBW = d.BytesPerSecond
-						case *bgpls.LinkAttrUnreservedBandwidth:
-							reservedBW = maxReservableLinkBW
-							for i := 0; i < 8; i++ {
-								reservedBW = reservedBW + (maxReservableLinkBW - d.BytesPerSecond[i])
-							}
-						}
-					}
-				}
-			}
-
-			if addr != nil {
-				log.Printf("link: %s maxBW: %f maxReservableBW: %f reservedBW: %f", addr, maxLinkBW, maxReservableLinkBW, reservedBW)
-			}
 		}
 	}
 }
