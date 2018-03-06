@@ -555,17 +555,6 @@ func TestSIDIndexLabel(t *testing.T) {
 	// invalid len
 	err = o.deserialize([]byte{})
 	assert.NotNil(t, err)
-
-	v6 := &SIDIndexLabelIPv6Address{}
-	assert.Equal(t, v6.Type(), SIDIndexLabelTypeIPv6Address)
-
-	// err deserializing v6 addr
-	err = v6.deserialize([]byte{})
-	assert.NotNil(t, err)
-
-	// err serializing v6 addr
-	_, err = v6.serialize()
-	assert.NotNil(t, err)
 }
 
 func TestNodeAttrSRLocalBlock(t *testing.T) {
@@ -1990,11 +1979,13 @@ func TestUpdateMessage(t *testing.T) {
 					},
 				},
 				&LinkAttrPeerAdjSID{
-					Value:  true,
-					Local:  true,
-					Weight: 2,
-					SIDIndexLabel: &SIDIndexLabelIPv6Address{
-						Address: net.ParseIP("2601::1"),
+					Value:      true,
+					Local:      true,
+					Backup:     true,
+					Persistent: true,
+					Weight:     2,
+					SIDIndexLabel: &SIDIndexLabelLabel{
+						Label: 2,
 					},
 				},
 				&LinkAttrPeerSetSID{

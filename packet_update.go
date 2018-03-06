@@ -2147,8 +2147,8 @@ func (l *LinkAttrLinkName) serialize() ([]byte, error) {
 }
 
 // SIDIndexLabel is a common, variable field in SR-related attrs and contains
-// either an mpls label, a 4 octet index defining an offset, or an IPv6 address.
-// Drafts refer to this as SID/Index/Label or SID/Label/Index.
+// either an mpls label or a 4 octet index defining an offset. Drafts refer to
+// this as SID/Index/Label or SID/Label/Index.
 type SIDIndexLabel interface {
 	Type() SIDIndexLabelType
 	serialize() ([]byte, error)
@@ -2159,9 +2159,8 @@ type SIDIndexLabelType uint8
 
 // SIDIndexLabelType values
 const (
-	SIDIndexLabelTypeLabel       SIDIndexLabelType = 3
-	SIDIndexLabelTypeOffset      SIDIndexLabelType = 4
-	SIDIndexLabelTypeIPv6Address SIDIndexLabelType = 16
+	SIDIndexLabelTypeLabel  SIDIndexLabelType = 3
+	SIDIndexLabelTypeOffset SIDIndexLabelType = 4
 )
 
 // SIDIndexLabelLabel is an mpls label contained in a SIDIndexLabel
@@ -2208,10 +2207,6 @@ func deserializeSIDIndexLabel(b []byte) (SIDIndexLabel, error) {
 		sil := &SIDIndexLabelOffset{}
 		err := sil.deserialize(b)
 		return sil, err
-	case 16:
-		sil := &SIDIndexLabelIPv6Address{}
-		err := sil.deserialize(b)
-		return sil, err
 	default:
 		return nil, &errWithNotification{
 			error:   errors.New("invalid length for SIDIndexLabel"),
@@ -2248,35 +2243,6 @@ func (l *SIDIndexLabelOffset) serialize() ([]byte, error) {
 	b := make([]byte, 4)
 	binary.BigEndian.PutUint32(b, l.Offset)
 	return b, nil
-}
-
-// SIDIndexLabelIPv6Address is an IPv6 address contained in a SIDIndexLabel.
-type SIDIndexLabelIPv6Address struct {
-	Address net.IP
-}
-
-// Type returns the appropriate SIDIndexLabelType for SIDIndexLabelIPv6Address
-func (l *SIDIndexLabelIPv6Address) Type() SIDIndexLabelType {
-	return SIDIndexLabelTypeIPv6Address
-}
-
-func (l *SIDIndexLabelIPv6Address) deserialize(b []byte) error {
-	addr, err := deserializeIPv6Addr(b)
-	if err != nil {
-		return err
-	}
-
-	l.Address = addr
-	return nil
-}
-
-func (l *SIDIndexLabelIPv6Address) serialize() ([]byte, error) {
-	addr := l.Address.To16()
-	if addr == nil {
-		return nil, errors.New("invalid address")
-	}
-
-	return addr, nil
 }
 
 // LinkAttrAdjSIDFlagsType describes the type of LinkAttrAdjSIDFlags
@@ -2707,6 +2673,8 @@ func (l *LinkAttrPeerNodeSID) serialize() ([]byte, error) {
 type LinkAttrPeerAdjSID struct {
 	Value         bool
 	Local         bool
+	Backup        bool
+	Persistent    bool
 	Weight        uint8
 	SIDIndexLabel SIDIndexLabel
 }
@@ -2727,6 +2695,8 @@ func (l *LinkAttrPeerAdjSID) deserialize(b []byte) error {
 
 	l.Value = (b[0] & 128) != 0
 	l.Local = (b[0] & 64) != 0
+	l.Backup = (b[0] & 32) != 0
+	l.Persistent = (b[0] & 16) != 0
 	l.Weight = b[1]
 	sil, err := deserializeSIDIndexLabel(b[4:])
 	if err != nil {
@@ -2755,6 +2725,12 @@ func (l *LinkAttrPeerAdjSID) serialize() ([]byte, error) {
 	}
 	if l.Local {
 		b[4] += 64
+	}
+	if l.Backup {
+		b[4] += 32
+	}
+	if l.Persistent {
+		b[4] += 16
 	}
 	b[5] = l.Weight
 	b = append(b, sil...)
