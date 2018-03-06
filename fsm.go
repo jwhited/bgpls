@@ -488,7 +488,7 @@ func (f *standardFSM) openConfirm() FSMState {
 		case m := <-f.msgCh:
 			_, isKeepAlive := m.(*keepAliveMessage)
 			if !isKeepAlive {
-				next := f.handleErr(fmt.Errorf("message received in openConfirm state is not a keepalive, type: %s", m.MessageType()), IdleState)
+				next := f.handleUnexpectedMessageType(m.MessageType(), IdleState)
 				drainTimers(f.holdTimer)
 				f.cleanupConnAndReader()
 				return next
