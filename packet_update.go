@@ -1173,7 +1173,7 @@ func (n *NodeAttrLocalIPv6RouterID) serialize() ([]byte, error) {
 // SIDLabel is contained in the NodeAttrSRCaps and NodeAttrSRLocalBlock
 // node attributes.
 //
-// https://tools.ietf.org/html/draft-ietf-idr-bgp-ls-segment-routing-ext-05#section-2.1.1
+// https://tools.ietf.org/html/draft-ietf-idr-bgp-ls-segment-routing-ext-04#section-2.1.1
 type SIDLabel interface {
 	Type() SIDLabelType
 	serialize() ([]byte, error)
@@ -1355,7 +1355,7 @@ func deserializeRangeSIDLabel(b []byte) ([]RangeSIDLabel, error) {
 
 // NodeAttrSRCaps is a node attribute contained in a bgp-ls attribute.
 //
-// https://tools.ietf.org/html/draft-ietf-idr-bgp-ls-segment-routing-ext-05#section-2.1.2
+// https://tools.ietf.org/html/draft-ietf-idr-bgp-ls-segment-routing-ext-04#section-2.1.2
 type NodeAttrSRCaps struct {
 	MplsIPv4      bool
 	MplsIPv6      bool
@@ -1451,7 +1451,7 @@ func (n *NodeAttrSRAlgo) deserialize(b []byte) error {
 
 // NodeAttrSRLocalBlock is a node attribute contained in a bgp-ls attribute.
 //
-// https://tools.ietf.org/html/draft-ietf-idr-bgp-ls-segment-routing-ext-05#section-2.1.4
+// https://tools.ietf.org/html/draft-ietf-idr-bgp-ls-segment-routing-ext-04#section-2.1.4
 type NodeAttrSRLocalBlock struct {
 	RangeSIDLabel []RangeSIDLabel
 }
@@ -1499,7 +1499,7 @@ func (n *NodeAttrSRLocalBlock) deserialize(b []byte) error {
 
 // NodeAttrSRMSPref is a node attribute contained in a bgp-ls attribute.
 //
-// https://tools.ietf.org/html/draft-ietf-idr-bgp-ls-segment-routing-ext-05#section-2.1.5
+// https://tools.ietf.org/html/draft-ietf-idr-bgp-ls-segment-routing-ext-04#section-2.1.5
 type NodeAttrSRMSPref struct {
 	Preference uint8
 }
@@ -2388,7 +2388,7 @@ func deserializeLinkAttrAdjSIDFlags(b byte, nlriProtocol LinkStateNlriProtocolID
 
 // LinkAttrAdjSID is a link attribute contained in a bgp-ls attribute.
 //
-// https://tools.ietf.org/html/draft-ietf-idr-bgp-ls-segment-routing-ext-05#section-2.2.1
+// https://tools.ietf.org/html/draft-ietf-idr-bgp-ls-segment-routing-ext-04#section-2.2.1
 type LinkAttrAdjSID struct {
 	Flags         LinkAttrAdjSIDFlags
 	Weight        uint8
@@ -2532,7 +2532,7 @@ func (l *LinkAttrLanAdjSIDProtoSpecificIDIsIs) serialize() []byte {
 
 // LinkAttrLanAdjSID is a link attribute contained in a bgp-ls attribute.
 //
-// https://tools.ietf.org/html/draft-ietf-idr-bgp-ls-segment-routing-ext-05#section-2.2.2
+// https://tools.ietf.org/html/draft-ietf-idr-bgp-ls-segment-routing-ext-04#section-2.2.2
 type LinkAttrLanAdjSID struct {
 	Flags              LinkAttrAdjSIDFlags
 	Weight             uint8
@@ -2620,7 +2620,7 @@ func (l *LinkAttrLanAdjSID) serialize() ([]byte, error) {
 
 // LinkAttrPeerNodeSID is a link attribute contained a bgp-ls attribute.
 //
-// https://tools.ietf.org/html/draft-ietf-idr-bgpls-segment-routing-epe-14#section-4.4
+// https://tools.ietf.org/html/draft-ietf-idr-bgpls-segment-routing-epe-15#section-4.4
 type LinkAttrPeerNodeSID struct {
 	Weight        uint8
 	SIDIndexLabel SIDIndexLabel
@@ -2669,7 +2669,7 @@ func (l *LinkAttrPeerNodeSID) serialize() ([]byte, error) {
 
 // LinkAttrPeerAdjSID is a link attribute contained a bgp-ls attribute.
 //
-// https://tools.ietf.org/html/draft-ietf-idr-bgpls-segment-routing-epe-14#section-4.4
+// https://tools.ietf.org/html/draft-ietf-idr-bgpls-segment-routing-epe-15#section-4.4
 type LinkAttrPeerAdjSID struct {
 	Value         bool
 	Local         bool
@@ -2739,7 +2739,7 @@ func (l *LinkAttrPeerAdjSID) serialize() ([]byte, error) {
 
 // LinkAttrPeerSetSID is a link attributed contained a bgp-ls attribute
 //
-// https://tools.ietf.org/html/draft-ietf-idr-bgpls-segment-routing-epe-14#section-4.4
+// https://tools.ietf.org/html/draft-ietf-idr-bgpls-segment-routing-epe-15#section-4.4
 type LinkAttrPeerSetSID struct {
 	Weight        uint8
 	SIDIndexLabel SIDIndexLabel
@@ -3184,7 +3184,7 @@ func (l *LinkAttrUniBandwidthUtil) serialize() ([]byte, error) {
 
 // LinkAttrL2BundleMember is a link attribute contained in a bgp-ls attribute.
 //
-// https://tools.ietf.org/html/draft-ietf-idr-bgp-ls-segment-routing-ext-05#section-2.2.3
+// https://tools.ietf.org/html/draft-ietf-idr-bgp-ls-segment-routing-ext-04#section-2.2.3
 type LinkAttrL2BundleMember struct {
 	MemberDescriptor uint32
 	LinkAttrs        []LinkAttr
@@ -3633,7 +3633,7 @@ func (p *PrefixAttrPrefixSIDFlagsOspf) serialize() byte {
 
 // PrefixAttrPrefixSID is a prefix attribute contained in a bgp-ls attribute.
 //
-// https://tools.ietf.org/html/draft-ietf-idr-bgp-ls-segment-routing-ext-05#section-2.3.1
+// https://tools.ietf.org/html/draft-ietf-idr-bgp-ls-segment-routing-ext-04#section-2.3.1
 type PrefixAttrPrefixSID struct {
 	Flags         PrefixAttrPrefixSIDFlags
 	Algorithm     uint8
@@ -3787,7 +3787,7 @@ func (p *PrefixAttrRangeFlagsOspf) serialize() byte {
 
 // PrefixAttrRange is a prefix attribute contained in a bgp-ls attribute.
 //
-// https://tools.ietf.org/html/draft-ietf-idr-bgp-ls-segment-routing-ext-05#section-2.3.4
+// https://tools.ietf.org/html/draft-ietf-idr-bgp-ls-segment-routing-ext-04#section-2.3.4
 type PrefixAttrRange struct {
 	Flags     PrefixAttrRangeFlags
 	RangeSize uint16
@@ -3886,7 +3886,7 @@ func (p *PrefixAttrRange) serialize() ([]byte, error) {
 
 // PrefixAttrFlagsOSPFv2 is a prefix attribute contained in a bgp-ls attribute.
 //
-// https://tools.ietf.org/html/draft-ietf-idr-bgp-ls-segment-routing-ext-05#section-2.3.2
+// https://tools.ietf.org/html/draft-ietf-idr-bgp-ls-segment-routing-ext-04#section-2.3.2
 //
 // https://tools.ietf.org/html/rfc7684#section-2.1
 type PrefixAttrFlagsOSPFv2 struct {
@@ -3929,7 +3929,7 @@ func (p *PrefixAttrFlagsOSPFv2) serialize() ([]byte, error) {
 
 // PrefixAttrFlagsOSPFv3 is a prefix attribute contained in a bgp-ls attribute.
 //
-// https://tools.ietf.org/html/draft-ietf-idr-bgp-ls-segment-routing-ext-05#section-2.3.2
+// https://tools.ietf.org/html/draft-ietf-idr-bgp-ls-segment-routing-ext-04#section-2.3.2
 //
 // https://tools.ietf.org/html/rfc5340#appendix-A.4.1.1
 type PrefixAttrFlagsOSPFv3 struct {
@@ -3983,7 +3983,7 @@ func (p *PrefixAttrFlagsOSPFv3) serialize() ([]byte, error) {
 
 // PrefixAttrFlagsIsIs is a prefix attribute contained in a bgp-ls attribute.
 //
-// https://tools.ietf.org/html/draft-ietf-idr-bgp-ls-segment-routing-ext-05#section-2.3.2
+// https://tools.ietf.org/html/draft-ietf-idr-bgp-ls-segment-routing-ext-04#section-2.3.2
 //
 // https://tools.ietf.org/html/rfc7794#section-2.1
 type PrefixAttrFlagsIsIs struct {
@@ -4032,7 +4032,7 @@ func (p *PrefixAttrFlagsIsIs) serialize() ([]byte, error) {
 
 // PrefixAttrSourceRouterID is a prefix attribute contained in a bgp-ls attribute.
 //
-// https://tools.ietf.org/html/draft-ietf-idr-bgp-ls-segment-routing-ext-05#section-2.3.3
+// https://tools.ietf.org/html/draft-ietf-idr-bgp-ls-segment-routing-ext-04#section-2.3.3
 type PrefixAttrSourceRouterID struct {
 	RouterID net.IP
 }
@@ -4957,7 +4957,7 @@ func (n *NodeDescriptorIgpRouterIDOspfPseudo) serialize() ([]byte, error) {
 
 // NodeDescriptorBgpRouterID is a node descriptor contained in a bgp-ls node nlri
 //
-// https://tools.ietf.org/html/draft-ietf-idr-bgpls-segment-routing-epe-14#section-4.1
+// https://tools.ietf.org/html/draft-ietf-idr-bgpls-segment-routing-epe-15#section-4.1
 type NodeDescriptorBgpRouterID struct {
 	RouterID net.IP
 }
@@ -4982,7 +4982,7 @@ func (n *NodeDescriptorBgpRouterID) serialize() ([]byte, error) {
 
 // NodeDescriptorMemberASN is a node descriptor contained in a bgp-ls node nlri
 //
-// https://tools.ietf.org/html/draft-ietf-idr-bgpls-segment-routing-epe-14#section-4.1
+// https://tools.ietf.org/html/draft-ietf-idr-bgpls-segment-routing-epe-15#section-4.1
 type NodeDescriptorMemberASN struct {
 	ASN uint32
 }
