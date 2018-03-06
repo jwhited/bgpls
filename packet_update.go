@@ -7,6 +7,11 @@ import (
 	"fmt"
 	"math"
 	"net"
+	"time"
+)
+
+const (
+	maxUint24 = 1<<24 - 1
 )
 
 // UpdateMessage is a bgp message.
@@ -76,6 +81,30 @@ func (u *UpdateMessage) deserialize(b []byte) error {
 	u.PathAttrs = attrs
 
 	return nil
+}
+
+// extractNlriProtocolFromAttrs traverses the provided attrs in search of
+// PathAttrMp(Un)Reach. If found, searches the nlri for the first protocol ID.
+// If no nlri protocol ID is found an error is returned.
+func extractNlriProtocolFromAttrs(attrs []PathAttr) (LinkStateNlriProtocolID, error) {
+	for _, a := range attrs {
+		switch a := a.(type) {
+		case *PathAttrMpReach:
+			for _, b := range a.Nlri {
+				return b.Protocol(), nil
+			}
+		case *PathAttrMpUnreach:
+			for _, b := range a.Nlri {
+				return b.Protocol(), nil
+			}
+		}
+	}
+
+	return 0, &errWithNotification{
+		error:   errors.New("no NLRI protocol found"),
+		code:    NotifErrCodeUpdateMessage,
+		subcode: NotifErrSubcodeMalformedAttr,
+	}
 }
 
 func deserializePathAttrs(b []byte) ([]PathAttr, error) {
@@ -181,8 +210,13 @@ func deserializePathAttrs(b []byte) ([]PathAttr, error) {
 				return nil, err
 			}
 
+			nlriProtocol, err := extractNlriProtocolFromAttrs(attrs)
+			if err != nil {
+				return nil, err
+			}
+
 			attr := &PathAttrLinkState{}
-			err = attr.deserialize(flags, attrToDecode)
+			err = attr.deserialize(flags, attrToDecode, nlriProtocol)
 			if err != nil {
 				return nil, err
 			}
@@ -340,11 +374,13 @@ func (p *PathAttrLinkState) Type() PathAttrType {
 	return PathAttrLinkStateType
 }
 
-func (p *PathAttrLinkState) deserialize(f PathAttrFlags, b []byte) error {
-	p.f = f
+func deserializeLinkStateAttrs(b []byte, nlriProtocol LinkStateNlriProtocolID) ([]NodeAttr, []LinkAttr, []PrefixAttr, error) {
+	var nodeAttr []NodeAttr
+	var linkAttr []LinkAttr
+	var prefixAttr []PrefixAttr
 
 	if len(b) == 0 {
-		return nil
+		return nil, nil, nil, nil
 	}
 
 	tooShortErr := &errWithNotification{
@@ -354,7 +390,7 @@ func (p *PathAttrLinkState) deserialize(f PathAttrFlags, b []byte) error {
 	}
 
 	if len(b) < 4 {
-		return tooShortErr
+		return nil, nil, nil, tooShortErr
 	}
 
 	for {
@@ -363,7 +399,7 @@ func (p *PathAttrLinkState) deserialize(f PathAttrFlags, b []byte) error {
 		b = b[4:]
 
 		if len(b) < lsAttrLen {
-			return tooShortErr
+			return nil, nil, nil, tooShortErr
 		}
 
 		attrToDecode := b[:lsAttrLen]
@@ -374,207 +410,355 @@ func (p *PathAttrLinkState) deserialize(f PathAttrFlags, b []byte) error {
 			attr := &NodeAttrIsIsAreaID{}
 			err := attr.deserialize(attrToDecode)
 			if err != nil {
-				return err
+				return nil, nil, nil, err
 			}
-			p.NodeAttrs = append(p.NodeAttrs, attr)
+			nodeAttr = append(nodeAttr, attr)
 		case uint16(NodeAttrCodeLocalIPv4RouterID):
 			attr := &NodeAttrLocalIPv4RouterID{}
 			err := attr.deserialize(attrToDecode)
 			if err != nil {
-				return err
+				return nil, nil, nil, err
 			}
-			p.NodeAttrs = append(p.NodeAttrs, attr)
+			nodeAttr = append(nodeAttr, attr)
 		case uint16(NodeAttrCodeLocalIPv6RouterID):
 			attr := &NodeAttrLocalIPv6RouterID{}
 			err := attr.deserialize(attrToDecode)
 			if err != nil {
-				return err
+				return nil, nil, nil, err
 			}
-			p.NodeAttrs = append(p.NodeAttrs, attr)
+			nodeAttr = append(nodeAttr, attr)
 		case uint16(NodeAttrCodeMultiTopologyID):
 			attr := &NodeAttrMultiTopologyID{}
 			err := attr.deserialize(attrToDecode)
 			if err != nil {
-				return err
+				return nil, nil, nil, err
 			}
-			p.NodeAttrs = append(p.NodeAttrs, attr)
+			nodeAttr = append(nodeAttr, attr)
 		case uint16(NodeAttrCodeNodeFlagBits):
 			attr := &NodeAttrNodeFlagBits{}
 			err := attr.deserialize(attrToDecode)
 			if err != nil {
-				return err
+				return nil, nil, nil, err
 			}
-			p.NodeAttrs = append(p.NodeAttrs, attr)
+			nodeAttr = append(nodeAttr, attr)
 		case uint16(NodeAttrCodeNodeName):
 			attr := &NodeAttrNodeName{}
 			err := attr.deserialize(attrToDecode)
 			if err != nil {
-				return err
+				return nil, nil, nil, err
 			}
-			p.NodeAttrs = append(p.NodeAttrs, attr)
+			nodeAttr = append(nodeAttr, attr)
 		case uint16(NodeAttrCodeOpaqueNodeAttr):
 			attr := &NodeAttrOpaqueNodeAttr{}
 			err := attr.deserialize(attrToDecode)
 			if err != nil {
-				return err
+				return nil, nil, nil, err
 			}
-			p.NodeAttrs = append(p.NodeAttrs, attr)
+			nodeAttr = append(nodeAttr, attr)
+		case uint16(NodeAttrCodeSRCaps):
+			attr := &NodeAttrSRCaps{}
+			err := attr.deserialize(attrToDecode)
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			nodeAttr = append(nodeAttr, attr)
+		case uint16(NodeAttrCodeSRAlgo):
+			attr := &NodeAttrSRAlgo{}
+			err := attr.deserialize(attrToDecode)
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			nodeAttr = append(nodeAttr, attr)
+		case uint16(NodeAttrCodeSRLocalBlock):
+			attr := &NodeAttrSRLocalBlock{}
+			err := attr.deserialize(attrToDecode)
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			nodeAttr = append(nodeAttr, attr)
+		case uint16(NodeAttrCodeSRMSPref):
+			attr := &NodeAttrSRMSPref{}
+			err := attr.deserialize(attrToDecode)
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			nodeAttr = append(nodeAttr, attr)
 		case uint16(LinkAttrCodeAdminGroup):
 			attr := &LinkAttrAdminGroup{}
 			err := attr.deserialize(attrToDecode)
 			if err != nil {
-				return err
+				return nil, nil, nil, err
 			}
-			p.LinkAttrs = append(p.LinkAttrs, attr)
+			linkAttr = append(linkAttr, attr)
 		case uint16(LinkAttrCodeIgpMetric):
 			attr := &LinkAttrIgpMetric{}
 			err := attr.deserialize(attrToDecode)
 			if err != nil {
-				return err
+				return nil, nil, nil, err
 			}
-			p.LinkAttrs = append(p.LinkAttrs, attr)
+			linkAttr = append(linkAttr, attr)
 		case uint16(LinkAttrCodeLinkName):
 			attr := &LinkAttrLinkName{}
 			err := attr.deserialize(attrToDecode)
 			if err != nil {
-				return err
+				return nil, nil, nil, err
 			}
-			p.LinkAttrs = append(p.LinkAttrs, attr)
+			linkAttr = append(linkAttr, attr)
 		case uint16(LinkAttrCodeLinkProtectionType):
 			attr := &LinkAttrLinkProtectionType{}
 			err := attr.deserialize(attrToDecode)
 			if err != nil {
-				return err
+				return nil, nil, nil, err
 			}
-			p.LinkAttrs = append(p.LinkAttrs, attr)
+			linkAttr = append(linkAttr, attr)
 		case uint16(LinkAttrCodeMaxLinkBandwidth):
 			attr := &LinkAttrMaxLinkBandwidth{}
 			err := attr.deserialize(attrToDecode)
 			if err != nil {
-				return err
+				return nil, nil, nil, err
 			}
-			p.LinkAttrs = append(p.LinkAttrs, attr)
+			linkAttr = append(linkAttr, attr)
 		case uint16(LinkAttrCodeMaxReservableLinkBandwidth):
 			attr := &LinkAttrMaxReservableLinkBandwidth{}
 			err := attr.deserialize(attrToDecode)
 			if err != nil {
-				return err
+				return nil, nil, nil, err
 			}
-			p.LinkAttrs = append(p.LinkAttrs, attr)
+			linkAttr = append(linkAttr, attr)
 		case uint16(LinkAttrCodeMplsProtocolMask):
 			attr := &LinkAttrMplsProtocolMask{}
 			err := attr.deserialize(attrToDecode)
 			if err != nil {
-				return err
+				return nil, nil, nil, err
 			}
-			p.LinkAttrs = append(p.LinkAttrs, attr)
+			linkAttr = append(linkAttr, attr)
 		case uint16(LinkAttrCodeOpaqueLinkAttr):
 			attr := &LinkAttrOpaqueLinkAttr{}
 			err := attr.deserialize(attrToDecode)
 			if err != nil {
-				return err
+				return nil, nil, nil, err
 			}
-			p.LinkAttrs = append(p.LinkAttrs, attr)
+			linkAttr = append(linkAttr, attr)
 		case uint16(LinkAttrCodeRemoteIPv4RouterID):
 			attr := &LinkAttrRemoteIPv4RouterID{}
 			err := attr.deserialize(attrToDecode)
 			if err != nil {
-				return err
+				return nil, nil, nil, err
 			}
-			p.LinkAttrs = append(p.LinkAttrs, attr)
+			linkAttr = append(linkAttr, attr)
 		case uint16(LinkAttrCodeRemoteIPv6RouterID):
 			attr := &LinkAttrRemoteIPv6RouterID{}
 			err := attr.deserialize(attrToDecode)
 			if err != nil {
-				return err
+				return nil, nil, nil, err
 			}
-			p.LinkAttrs = append(p.LinkAttrs, attr)
+			linkAttr = append(linkAttr, attr)
 		case uint16(LinkAttrCodeSharedRiskLinkGroup):
 			attr := &LinkAttrSharedRiskLinkGroup{}
 			err := attr.deserialize(attrToDecode)
 			if err != nil {
-				return err
+				return nil, nil, nil, err
 			}
-			p.LinkAttrs = append(p.LinkAttrs, attr)
+			linkAttr = append(linkAttr, attr)
 		case uint16(LinkAttrCodeTEDefaultMetric):
 			attr := &LinkAttrTEDefaultMetric{}
 			err := attr.deserialize(attrToDecode)
 			if err != nil {
-				return err
+				return nil, nil, nil, err
 			}
-			p.LinkAttrs = append(p.LinkAttrs, attr)
+			linkAttr = append(linkAttr, attr)
 		case uint16(LinkAttrCodeUnreservedBandwidth):
 			attr := &LinkAttrUnreservedBandwidth{}
 			err := attr.deserialize(attrToDecode)
 			if err != nil {
-				return err
+				return nil, nil, nil, err
 			}
-			p.LinkAttrs = append(p.LinkAttrs, attr)
+			linkAttr = append(linkAttr, attr)
 		case uint16(LinkAttrCodePeerNodeSID):
 			attr := &LinkAttrPeerNodeSID{}
 			err := attr.deserialize(attrToDecode)
 			if err != nil {
-				return err
+				return nil, nil, nil, err
 			}
-			p.LinkAttrs = append(p.LinkAttrs, attr)
+			linkAttr = append(linkAttr, attr)
 		case uint16(LinkAttrCodePeerAdjSID):
 			attr := &LinkAttrPeerAdjSID{}
 			err := attr.deserialize(attrToDecode)
 			if err != nil {
-				return err
+				return nil, nil, nil, err
 			}
-			p.LinkAttrs = append(p.LinkAttrs, attr)
+			linkAttr = append(linkAttr, attr)
 		case uint16(LinkAttrCodePeerSetSID):
 			attr := &LinkAttrPeerSetSID{}
 			err := attr.deserialize(attrToDecode)
 			if err != nil {
-				return err
+				return nil, nil, nil, err
 			}
-			p.LinkAttrs = append(p.LinkAttrs, attr)
+			linkAttr = append(linkAttr, attr)
+		case uint16(LinkAttrCodeAdjSID):
+			attr := &LinkAttrAdjSID{}
+			err := attr.deserialize(attrToDecode, nlriProtocol)
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			linkAttr = append(linkAttr, attr)
+		case uint16(LinkAttrCodeLanAdjSID):
+			attr := &LinkAttrLanAdjSID{}
+			err := attr.deserialize(attrToDecode, nlriProtocol)
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			linkAttr = append(linkAttr, attr)
+		case uint16(LinkAttrCodeUniLinkDelay):
+			attr := &LinkAttrUniLinkDelay{}
+			err := attr.deserialize(attrToDecode)
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			linkAttr = append(linkAttr, attr)
+		case uint16(LinkAttrCodeMinMaxUniLinkDelay):
+			attr := &LinkAttrMinMaxUniLinkDelay{}
+			err := attr.deserialize(attrToDecode)
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			linkAttr = append(linkAttr, attr)
+		case uint16(LinkAttrCodeUniDelayVariation):
+			attr := &LinkAttrUniDelayVariation{}
+			err := attr.deserialize(attrToDecode)
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			linkAttr = append(linkAttr, attr)
+		case uint16(LinkAttrCodeUniPacketLoss):
+			attr := &LinkAttrUniPacketLoss{}
+			err := attr.deserialize(attrToDecode)
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			linkAttr = append(linkAttr, attr)
+		case uint16(LinkAttrCodeUniResidualBandwidth):
+			attr := &LinkAttrUniResidualBandwidth{}
+			err := attr.deserialize(attrToDecode)
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			linkAttr = append(linkAttr, attr)
+		case uint16(LinkAttrCodeUniAvailableBandwidth):
+			attr := &LinkAttrUniAvailableBandwidth{}
+			err := attr.deserialize(attrToDecode)
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			linkAttr = append(linkAttr, attr)
+		case uint16(LinkAttrCodeUniBandwidthUtil):
+			attr := &LinkAttrUniBandwidthUtil{}
+			err := attr.deserialize(attrToDecode)
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			linkAttr = append(linkAttr, attr)
+		case uint16(LinkAttrCodeL2BundleMember):
+			attr := &LinkAttrL2BundleMember{}
+			err := attr.deserialize(attrToDecode, nlriProtocol)
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			linkAttr = append(linkAttr, attr)
 		case uint16(PrefixAttrCodeIgpExtendedRouteTag):
 			attr := &PrefixAttrIgpExtendedRouteTag{}
 			err := attr.deserialize(attrToDecode)
 			if err != nil {
-				return err
+				return nil, nil, nil, err
 			}
-			p.PrefixAttrs = append(p.PrefixAttrs, attr)
+			prefixAttr = append(prefixAttr, attr)
 		case uint16(PrefixAttrCodeIgpFlags):
 			attr := &PrefixAttrIgpFlags{}
 			err := attr.deserialize(attrToDecode)
 			if err != nil {
-				return err
+				return nil, nil, nil, err
 			}
-			p.PrefixAttrs = append(p.PrefixAttrs, attr)
+			prefixAttr = append(prefixAttr, attr)
 		case uint16(PrefixAttrCodeIgpRouteTag):
 			attr := &PrefixAttrIgpRouteTag{}
 			err := attr.deserialize(attrToDecode)
 			if err != nil {
-				return err
+				return nil, nil, nil, err
 			}
-			p.PrefixAttrs = append(p.PrefixAttrs, attr)
+			prefixAttr = append(prefixAttr, attr)
 		case uint16(PrefixAttrCodeOpaquePrefixAttribute):
 			attr := &PrefixAttrOpaquePrefixAttribute{}
 			err := attr.deserialize(attrToDecode)
 			if err != nil {
-				return err
+				return nil, nil, nil, err
 			}
-			p.PrefixAttrs = append(p.PrefixAttrs, attr)
+			prefixAttr = append(prefixAttr, attr)
 		case uint16(PrefixAttrCodeOspfForwardingAddress):
 			attr := &PrefixAttrOspfForwardingAddress{}
 			err := attr.deserialize(attrToDecode)
 			if err != nil {
-				return err
+				return nil, nil, nil, err
 			}
-			p.PrefixAttrs = append(p.PrefixAttrs, attr)
+			prefixAttr = append(prefixAttr, attr)
 		case uint16(PrefixAttrCodePrefixMetric):
 			attr := &PrefixAttrPrefixMetric{}
 			err := attr.deserialize(attrToDecode)
 			if err != nil {
-				return err
+				return nil, nil, nil, err
 			}
-			p.PrefixAttrs = append(p.PrefixAttrs, attr)
+			prefixAttr = append(prefixAttr, attr)
+		case uint16(PrefixAttrCodePrefixSID):
+			attr := &PrefixAttrPrefixSID{}
+			err := attr.deserialize(attrToDecode, nlriProtocol)
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			prefixAttr = append(prefixAttr, attr)
+		case uint16(PrefixAttrCodeRange):
+			attr := &PrefixAttrRange{}
+			err := attr.deserialize(attrToDecode, nlriProtocol)
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			prefixAttr = append(prefixAttr, attr)
+		case uint16(PrefixAttrCodeFlags):
+			if nlriProtocol == LinkStateNlriOSPFv2ProtocolID {
+				attr := &PrefixAttrFlagsOSPFv2{}
+				err := attr.deserialize(attrToDecode)
+				if err != nil {
+					return nil, nil, nil, err
+				}
+				prefixAttr = append(prefixAttr, attr)
+			} else if nlriProtocol == LinkStateNlriOSPFv3ProtocolID {
+				attr := &PrefixAttrFlagsOSPFv3{}
+				err := attr.deserialize(attrToDecode)
+				if err != nil {
+					return nil, nil, nil, err
+				}
+				prefixAttr = append(prefixAttr, attr)
+			} else if nlriProtocol == LinkStateNlriIsIsL1ProtocolID || nlriProtocol == LinkStateNlriIsIsL2ProtocolID {
+				attr := &PrefixAttrFlagsIsIs{}
+				err := attr.deserialize(attrToDecode)
+				if err != nil {
+					return nil, nil, nil, err
+				}
+				prefixAttr = append(prefixAttr, attr)
+			} else {
+				return nil, nil, nil, &errWithNotification{
+					error:   errors.New("invalid nlri protocol for PrefixAttrFlags"),
+					code:    NotifErrCodeUpdateMessage,
+					subcode: NotifErrSubcodeMalformedAttr,
+				}
+			}
+		case uint16(PrefixAttrCodeSourceRouterID):
+			attr := &PrefixAttrSourceRouterID{}
+			err := attr.deserialize(attrToDecode)
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			prefixAttr = append(prefixAttr, attr)
 		default:
-			return &errWithNotification{
+			return nil, nil, nil, &errWithNotification{
 				error:   errors.New("unknown link state attr type"),
 				code:    NotifErrCodeUpdateMessage,
 				subcode: NotifErrSubcodeMalformedAttr,
@@ -585,6 +769,21 @@ func (p *PathAttrLinkState) deserialize(f PathAttrFlags, b []byte) error {
 			break
 		}
 	}
+
+	return nodeAttr, linkAttr, prefixAttr, nil
+}
+
+func (p *PathAttrLinkState) deserialize(f PathAttrFlags, b []byte, nlriProtocol LinkStateNlriProtocolID) error {
+	p.f = f
+
+	nodeAttr, linkAttr, prefixAttr, err := deserializeLinkStateAttrs(b, nlriProtocol)
+	if err != nil {
+		return err
+	}
+
+	p.NodeAttrs = nodeAttr
+	p.LinkAttrs = linkAttr
+	p.PrefixAttrs = prefixAttr
 
 	return nil
 }
@@ -716,6 +915,10 @@ const (
 	NodeAttrCodeIsIsAreaID        NodeAttrCode = 1027
 	NodeAttrCodeLocalIPv4RouterID NodeAttrCode = 1028
 	NodeAttrCodeLocalIPv6RouterID NodeAttrCode = 1029
+	NodeAttrCodeSRCaps            NodeAttrCode = 1034
+	NodeAttrCodeSRAlgo            NodeAttrCode = 1035
+	NodeAttrCodeSRLocalBlock      NodeAttrCode = 1036
+	NodeAttrCodeSRMSPref          NodeAttrCode = 1037
 )
 
 // NodeAttr is a node attribute contained in a bgp-ls attribute.
@@ -967,11 +1170,369 @@ func (n *NodeAttrLocalIPv6RouterID) serialize() ([]byte, error) {
 	return serializeBgpLsIPv6TLV(uint16(n.Code()), n.Address)
 }
 
+// SIDLabel is contained in the NodeAttrSRCaps and NodeAttrSRLocalBlock
+// node attributes.
+//
+// https://tools.ietf.org/html/draft-ietf-idr-bgp-ls-segment-routing-ext-04#section-2.1.1
+type SIDLabel interface {
+	Type() SIDLabelType
+	serialize() ([]byte, error)
+}
+
+const sidLabelCode = 1161
+
+// SIDLabelType describes the type of SIDLabel attribute.
+type SIDLabelType uint8
+
+// SIDLabelType values
+const (
+	SIDLabelTypeSID SIDLabelType = iota
+	SIDLabelTypeLabel
+)
+
+// SIDLabelLabel contains a 3 octet label.
+type SIDLabelLabel struct {
+	Label uint32
+}
+
+// Type returns the appropriate SIDLabelType for SIDLabeLabel.
+func (s *SIDLabelLabel) Type() SIDLabelType {
+	return SIDLabelTypeLabel
+}
+
+func (s *SIDLabelLabel) deserialize(b []byte) error {
+	if len(b) != 3 {
+		return &errWithNotification{
+			error:   errors.New("invalid length for SIDLabelLabel"),
+			code:    NotifErrCodeUpdateMessage,
+			subcode: NotifErrSubcodeMalformedAttr,
+		}
+	}
+
+	b = append([]byte{0}, b...)
+	s.Label = binary.BigEndian.Uint32(b)
+	return nil
+}
+
+func (s *SIDLabelLabel) serialize() ([]byte, error) {
+	b := make([]byte, 4)
+	binary.BigEndian.PutUint16(b, uint16(sidLabelCode))
+	binary.BigEndian.PutUint16(b[2:], uint16(3))
+
+	if s.Label > maxUint24 {
+		return nil, errors.New("label overflows 3 octets")
+	}
+
+	c := make([]byte, 4)
+	binary.BigEndian.PutUint32(c, s.Label)
+	b = append(b, c[1:]...)
+	return b, nil
+}
+
+// SIDLabelSID contains a 4 octet SID.
+type SIDLabelSID struct {
+	SID uint32
+}
+
+// Type returns the appropriate SIDLabelType for SIDLabelSID.
+func (s *SIDLabelSID) Type() SIDLabelType {
+	return SIDLabelTypeSID
+}
+
+func (s *SIDLabelSID) deserialize(b []byte) error {
+	if len(b) != 4 {
+		return &errWithNotification{
+			error:   errors.New("invalid length for SIDLabelSID"),
+			code:    NotifErrCodeUpdateMessage,
+			subcode: NotifErrSubcodeMalformedAttr,
+		}
+	}
+
+	s.SID = binary.BigEndian.Uint32(b)
+	return nil
+}
+
+func (s *SIDLabelSID) serialize() ([]byte, error) {
+	b := make([]byte, 8)
+	binary.BigEndian.PutUint16(b, uint16(sidLabelCode))
+	binary.BigEndian.PutUint16(b[2:], uint16(4))
+	binary.BigEndian.PutUint32(b[4:], s.SID)
+	return b, nil
+}
+
+// RangeSIDLabel is contained in the NodeAttrSRCaps and NodeAttrSRLocalBlock
+// node attributes.
+type RangeSIDLabel struct {
+	RangeSize uint32
+	SIDLabel  SIDLabel
+}
+
+func (r *RangeSIDLabel) serialize() ([]byte, error) {
+	if r.RangeSize > maxUint24 {
+		return nil, errors.New("range size overflows 3 octets")
+	}
+
+	b := make([]byte, 4)
+	binary.BigEndian.PutUint32(b, r.RangeSize)
+	b = b[1:]
+
+	if r.SIDLabel == nil {
+		return nil, errors.New("missing SIDLabel")
+	}
+
+	s, err := r.SIDLabel.serialize()
+	if err != nil {
+		return nil, err
+	}
+
+	b = append(b, s...)
+	return b, nil
+}
+
+func deserializeRangeSIDLabel(b []byte) ([]RangeSIDLabel, error) {
+	rsl := make([]RangeSIDLabel, 0)
+
+	errInvalidLen := &errWithNotification{
+		error:   errors.New("invalid length for RangeSIDLabel"),
+		code:    NotifErrCodeUpdateMessage,
+		subcode: NotifErrSubcodeMalformedAttr,
+	}
+
+	for {
+		if len(b) < 10 {
+			return nil, errInvalidLen
+		}
+
+		s := b[:3]
+		b = b[3:]
+		s = append([]byte{0}, s...)
+		r := RangeSIDLabel{}
+		r.RangeSize = binary.BigEndian.Uint32(s)
+
+		if binary.BigEndian.Uint16(b) != sidLabelCode {
+			return nil, &errWithNotification{
+				error:   errors.New("invalid type for SIDLabel"),
+				code:    NotifErrCodeUpdateMessage,
+				subcode: NotifErrSubcodeMalformedAttr,
+			}
+		}
+		b = b[2:]
+
+		attrLen := binary.BigEndian.Uint16(b)
+		b = b[2:]
+		if len(b) < int(attrLen) {
+			return nil, errInvalidLen
+		}
+		switch attrLen {
+		case 3:
+			sll := &SIDLabelLabel{}
+			err := sll.deserialize(b[:attrLen])
+			if err != nil {
+				return nil, err
+			}
+			r.SIDLabel = sll
+		case 4:
+			sls := &SIDLabelSID{}
+			err := sls.deserialize(b[:attrLen])
+			if err != nil {
+				return nil, err
+			}
+			r.SIDLabel = sls
+		default:
+			return nil, errInvalidLen
+		}
+
+		rsl = append(rsl, r)
+
+		b = b[attrLen:]
+		if len(b) == 0 {
+			break
+		}
+	}
+
+	return rsl, nil
+}
+
+// NodeAttrSRCaps is a node attribute contained in a bgp-ls attribute.
+//
+// https://tools.ietf.org/html/draft-ietf-idr-bgp-ls-segment-routing-ext-04#section-2.1.2
+type NodeAttrSRCaps struct {
+	MplsIPv4      bool
+	MplsIPv6      bool
+	RangeSIDLabel []RangeSIDLabel
+}
+
+// Code returns the appropriate NodeAttrCode for NodeAttrSRCaps
+func (n *NodeAttrSRCaps) Code() NodeAttrCode {
+	return NodeAttrCodeSRCaps
+}
+
+func (n *NodeAttrSRCaps) serialize() ([]byte, error) {
+	rsl := make([]byte, 0)
+	for _, r := range n.RangeSIDLabel {
+		b, err := r.serialize()
+		if err != nil {
+			return nil, err
+		}
+		rsl = append(rsl, b...)
+	}
+
+	b := make([]byte, 6)
+	binary.BigEndian.PutUint16(b, uint16(n.Code()))
+	binary.BigEndian.PutUint16(b[2:], uint16(2+len(rsl)))
+	if n.MplsIPv4 {
+		b[4] += 128
+	}
+	if n.MplsIPv4 {
+		b[4] += 64
+	}
+
+	b = append(b, rsl...)
+	return b, nil
+}
+
+func (n *NodeAttrSRCaps) deserialize(b []byte) error {
+	if len(b) < 8 {
+		return &errWithNotification{
+			error:   errors.New("invalid length for NodeAttrSRCaps"),
+			code:    NotifErrCodeUpdateMessage,
+			subcode: NotifErrSubcodeMalformedAttr,
+		}
+	}
+
+	n.MplsIPv4 = (b[0] & 128) != 0
+	n.MplsIPv6 = (b[0] & 64) != 0
+
+	rsl, err := deserializeRangeSIDLabel(b[2:])
+	if err != nil {
+		return err
+	}
+	n.RangeSIDLabel = rsl
+
+	return nil
+}
+
+// NodeAttrSRAlgo is a node attribute contained in a bgp-ls attribute.
+//
+// https://tools.ietf.org/html/draft-ietf-idr-bgp-ls-segment-routing-ext#section-2.1.3
+type NodeAttrSRAlgo struct {
+	Algos []uint8
+}
+
+// Code returns the appropriate NodeAttrCode for NodeAttrSRAlgo
+func (n *NodeAttrSRAlgo) Code() NodeAttrCode {
+	return NodeAttrCodeSRAlgo
+}
+
+func (n *NodeAttrSRAlgo) serialize() ([]byte, error) {
+	if len(n.Algos) < 1 {
+		return nil, errors.New("NodeAttrSRAlgo must have at least 1 algo")
+	}
+
+	b := make([]byte, 4)
+	binary.BigEndian.PutUint16(b[:2], uint16(n.Code()))
+	binary.BigEndian.PutUint16(b[2:], uint16(len(n.Algos)))
+	b = append(b, n.Algos...)
+
+	return b, nil
+}
+
+func (n *NodeAttrSRAlgo) deserialize(b []byte) error {
+	if len(b) < 1 {
+		return &errWithNotification{
+			error:   errors.New("NodeAttrSRAlgo must have at least 1 algo"),
+			code:    NotifErrCodeUpdateMessage,
+			subcode: NotifErrSubcodeMalformedAttr,
+		}
+	}
+	n.Algos = b
+	return nil
+}
+
+// NodeAttrSRLocalBlock is a node attribute contained in a bgp-ls attribute.
+//
+// https://tools.ietf.org/html/draft-ietf-idr-bgp-ls-segment-routing-ext-04#section-2.1.4
+type NodeAttrSRLocalBlock struct {
+	RangeSIDLabel []RangeSIDLabel
+}
+
+// Code returns the appropriate NodeAttrCode for NodeAttrSRLocalBlock
+func (n *NodeAttrSRLocalBlock) Code() NodeAttrCode {
+	return NodeAttrCodeSRLocalBlock
+}
+
+func (n *NodeAttrSRLocalBlock) serialize() ([]byte, error) {
+	rsl := make([]byte, 0)
+	for _, r := range n.RangeSIDLabel {
+		b, err := r.serialize()
+		if err != nil {
+			return nil, err
+		}
+		rsl = append(rsl, b...)
+	}
+
+	b := make([]byte, 6)
+	binary.BigEndian.PutUint16(b, uint16(n.Code()))
+	binary.BigEndian.PutUint16(b[2:], uint16(2+len(rsl)))
+
+	b = append(b, rsl...)
+	return b, nil
+}
+
+func (n *NodeAttrSRLocalBlock) deserialize(b []byte) error {
+	if len(b) < 8 {
+		return &errWithNotification{
+			error:   errors.New("invalid length for NodeAttrSRLocalBlock"),
+			code:    NotifErrCodeUpdateMessage,
+			subcode: NotifErrSubcodeMalformedAttr,
+		}
+	}
+
+	rsl, err := deserializeRangeSIDLabel(b[2:])
+	if err != nil {
+		return err
+	}
+	n.RangeSIDLabel = rsl
+
+	return nil
+}
+
+// NodeAttrSRMSPref is a node attribute contained in a bgp-ls attribute.
+//
+// https://tools.ietf.org/html/draft-ietf-idr-bgp-ls-segment-routing-ext-04#section-2.1.5
+type NodeAttrSRMSPref struct {
+	Preference uint8
+}
+
+// Code returns the appropriate NodeAttrCode for NodeAttrSRMSPref
+func (n *NodeAttrSRMSPref) Code() NodeAttrCode {
+	return NodeAttrCodeSRMSPref
+}
+
+func (n *NodeAttrSRMSPref) serialize() ([]byte, error) {
+	b := make([]byte, 5)
+	binary.BigEndian.PutUint16(b[:2], uint16(n.Code()))
+	binary.BigEndian.PutUint16(b[2:], uint16(1))
+	b[4] = n.Preference
+	return b, nil
+}
+
+func (n *NodeAttrSRMSPref) deserialize(b []byte) error {
+	if len(b) != 1 {
+		return &errWithNotification{
+			error:   errors.New("NodeAttrSRMSPref invalid length"),
+			code:    NotifErrCodeUpdateMessage,
+			subcode: NotifErrSubcodeMalformedAttr,
+		}
+	}
+	n.Preference = b[0]
+	return nil
+}
+
 // LinkAttr is a link attribute contained in a bgp-ls attribute.
 type LinkAttr interface {
 	Code() LinkAttrCode
 	serialize() ([]byte, error)
-	deserialize(b []byte) error
 }
 
 // LinkAttrCode describes the type of node attribute contained in a bgp-ls attribute.
@@ -994,9 +1555,19 @@ const (
 	LinkAttrCodeSharedRiskLinkGroup        LinkAttrCode = 1096
 	LinkAttrCodeOpaqueLinkAttr             LinkAttrCode = 1097
 	LinkAttrCodeLinkName                   LinkAttrCode = 1098
+	LinkAttrCodeAdjSID                     LinkAttrCode = 1099
+	LinkAttrCodeLanAdjSID                  LinkAttrCode = 1100
 	LinkAttrCodePeerNodeSID                LinkAttrCode = 1101
 	LinkAttrCodePeerAdjSID                 LinkAttrCode = 1102
 	LinkAttrCodePeerSetSID                 LinkAttrCode = 1103
+	LinkAttrCodeUniLinkDelay               LinkAttrCode = 1114
+	LinkAttrCodeMinMaxUniLinkDelay         LinkAttrCode = 1115
+	LinkAttrCodeUniDelayVariation          LinkAttrCode = 1116
+	LinkAttrCodeUniPacketLoss              LinkAttrCode = 1117
+	LinkAttrCodeUniResidualBandwidth       LinkAttrCode = 1118
+	LinkAttrCodeUniAvailableBandwidth      LinkAttrCode = 1119
+	LinkAttrCodeUniBandwidthUtil           LinkAttrCode = 1120
+	LinkAttrCodeL2BundleMember             LinkAttrCode = 1172
 )
 
 // LinkAttrRemoteIPv4RouterID is a link attribute contained in a bgp-ls attribute.
@@ -1134,15 +1705,9 @@ func (l *LinkAttrMaxLinkBandwidth) deserialize(b []byte) error {
 		}
 	}
 
-	var f float32
-	buff := bytes.NewReader(b)
-	err := binary.Read(buff, binary.BigEndian, &f)
+	f, err := deserializeFloat32(b)
 	if err != nil {
-		return &errWithNotification{
-			error:   errors.New("invalid value for max link bandwidth attribute"),
-			code:    NotifErrCodeUpdateMessage,
-			subcode: NotifErrSubcodeMalformedAttr,
-		}
+		return err
 	}
 	l.BytesPerSecond = f
 	return nil
@@ -1152,13 +1717,12 @@ func (l *LinkAttrMaxLinkBandwidth) serialize() ([]byte, error) {
 	b := make([]byte, 4)
 	binary.BigEndian.PutUint16(b[:2], uint16(l.Code()))
 	binary.BigEndian.PutUint16(b[2:], 4)
-	f := new(bytes.Buffer)
-	err := binary.Write(f, binary.BigEndian, l.BytesPerSecond)
+
+	f, err := serializeFloat32(l.BytesPerSecond)
 	if err != nil {
 		return nil, err
 	}
-
-	b = append(b, f.Bytes()...)
+	b = append(b, f...)
 	return b, nil
 }
 
@@ -1183,15 +1747,9 @@ func (l *LinkAttrMaxReservableLinkBandwidth) deserialize(b []byte) error {
 		}
 	}
 
-	var f float32
-	buff := bytes.NewReader(b)
-	err := binary.Read(buff, binary.BigEndian, &f)
+	f, err := deserializeFloat32(b)
 	if err != nil {
-		return &errWithNotification{
-			error:   errors.New("invalid value for max reservable link bandwidth attribute"),
-			code:    NotifErrCodeUpdateMessage,
-			subcode: NotifErrSubcodeMalformedAttr,
-		}
+		return err
 	}
 	l.BytesPerSecond = f
 	return nil
@@ -1201,13 +1759,12 @@ func (l *LinkAttrMaxReservableLinkBandwidth) serialize() ([]byte, error) {
 	b := make([]byte, 4)
 	binary.BigEndian.PutUint16(b[:2], uint16(l.Code()))
 	binary.BigEndian.PutUint16(b[2:], 4)
-	f := new(bytes.Buffer)
-	err := binary.Write(f, binary.BigEndian, l.BytesPerSecond)
+
+	f, err := serializeFloat32(l.BytesPerSecond)
 	if err != nil {
 		return nil, err
 	}
-
-	b = append(b, f.Bytes()...)
+	b = append(b, f...)
 	return b, nil
 }
 
@@ -1234,15 +1791,9 @@ func (l *LinkAttrUnreservedBandwidth) deserialize(b []byte) error {
 	}
 
 	for i := 0; i < 32; i = i + 4 {
-		var f float32
-		buff := bytes.NewReader(b[i : i+4])
-		err := binary.Read(buff, binary.BigEndian, &f)
+		f, err := deserializeFloat32(b[i : i+4])
 		if err != nil {
-			return &errWithNotification{
-				error:   errors.New("invalid value for unreserved bandwidth attribute"),
-				code:    NotifErrCodeUpdateMessage,
-				subcode: NotifErrSubcodeMalformedAttr,
-			}
+			return err
 		}
 		l.BytesPerSecond[i/4] = f
 	}
@@ -1256,12 +1807,11 @@ func (l *LinkAttrUnreservedBandwidth) serialize() ([]byte, error) {
 	binary.BigEndian.PutUint16(b[2:], uint16(32))
 
 	for i := 0; i < 8; i++ {
-		f := new(bytes.Buffer)
-		err := binary.Write(f, binary.BigEndian, l.BytesPerSecond[i])
+		f, err := serializeFloat32(l.BytesPerSecond[i])
 		if err != nil {
 			return nil, err
 		}
-		b = append(b, f.Bytes()...)
+		b = append(b, f...)
 	}
 	return b, nil
 }
@@ -1596,156 +2146,569 @@ func (l *LinkAttrLinkName) serialize() ([]byte, error) {
 	return serializeBgpLsStringTLV(uint16(l.Code()), l.Name)
 }
 
-// BaseSID contains the fields shared between PeerNodeSID, PeerAdjSID, and PeerSetSID link attrs
-type BaseSID struct {
-	Value    bool
-	Local    bool
-	Weight   uint8
-	Variable BaseSIDVariable
+// SIDIndexLabel is a common, variable field in SR-related attrs and contains
+// either an mpls label, a 4 octet index defining an offset, or an IPv6 address.
+// Drafts refer to this as SID/Index/Label or SID/Label/Index.
+type SIDIndexLabel interface {
+	Type() SIDIndexLabelType
+	serialize() ([]byte, error)
 }
 
-// BaseSIDVariable is a variable field in every PeerNodeSID, PeerAdjSID, or PeerSetSID link attr
-type BaseSIDVariable interface {
-	Type() BaseSIDVariableType
-}
+// SIDIndexLabelType describes the type of variable SR field.
+type SIDIndexLabelType uint8
 
-// BaseSIDVariableType describes the type of variable field contained in every PeerNodeSID, PeerAdjSID, or PeerSetSID link attr
-type BaseSIDVariableType uint8
-
-// BaseSIDVariableType values
+// SIDIndexLabelType values
 const (
-	BaseSIDVariableTypeSIDLabel   BaseSIDVariableType = 3
-	BaseSIDVariableTypeSRGBOffset BaseSIDVariableType = 4
-	BaseSIDVariableTypeIPv6SID    BaseSIDVariableType = 16
+	SIDIndexLabelTypeLabel       SIDIndexLabelType = 3
+	SIDIndexLabelTypeOffset      SIDIndexLabelType = 4
+	SIDIndexLabelTypeIPv6Address SIDIndexLabelType = 16
 )
 
-// SIDLabel is an mpls label contained in a PeerNodeSID, PeerAdjSID, or PeerSetSID link attr
-type SIDLabel struct {
+// SIDIndexLabelLabel is an mpls label contained in a SIDIndexLabel
+type SIDIndexLabelLabel struct {
 	Label uint32
 }
 
-// Type returns the appropriate BaseSIDVariableType for SIDLabel
-func (l *SIDLabel) Type() BaseSIDVariableType {
-	return BaseSIDVariableTypeSIDLabel
+// Type returns the appropriate SIDIndexLabelType for SIDIndexLabelLabel
+func (l *SIDIndexLabelLabel) Type() SIDIndexLabelType {
+	return SIDIndexLabelTypeLabel
 }
 
-// SRGBOffset is Segment Routing Global Block offset contaiend in a PeerNodeSID, PeerAdjSID, or PeerSetSID link attr
-type SRGBOffset struct {
-	Offset uint32
-}
-
-// Type returns the appropriate BaseSIDVariableType for SRGBOffset
-func (l *SRGBOffset) Type() BaseSIDVariableType {
-	return BaseSIDVariableTypeSRGBOffset
-}
-
-// IPv6SID is an IPv6 address contained in a PeerNodeSID, PeerAdjSID, or PeerSetSID link attr
-type IPv6SID struct {
-	Address net.IP
-}
-
-// Type returns the appropriate BaseSIDVariableType for IPv6SID
-func (l *IPv6SID) Type() BaseSIDVariableType {
-	return BaseSIDVariableTypeIPv6SID
-}
-
-func (s *BaseSID) deserialize(b []byte) error {
-	if len(b) != 7 && len(b) != 8 && len(b) != 20 {
+func (l *SIDIndexLabelLabel) deserialize(b []byte) error {
+	if len(b) != 3 {
 		return &errWithNotification{
-			error:   errors.New("SID TLV invalid length"),
+			error:   errors.New("invalid length for SIDIndexLabelLabel"),
 			code:    NotifErrCodeUpdateMessage,
 			subcode: NotifErrSubcodeMalformedAttr,
 		}
 	}
 
-	flags := b[0]
-	s.Value = (flags & 128) != 0
-	s.Local = (flags & 64) != 0
-	s.Weight = b[1]
-
-	switch len(b) {
-	case 7:
-		b = append([]byte{0}, b[4:]...)
-		label := &SIDLabel{
-			Label: binary.BigEndian.Uint32(b),
-		}
-		s.Variable = label
-	case 8:
-		b = b[4:]
-		offset := &SRGBOffset{
-			Offset: binary.BigEndian.Uint32(b),
-		}
-		s.Variable = offset
-	case 20:
-		b = b[4:]
-		sid := &IPv6SID{
-			Address: net.IP(b),
-		}
-		s.Variable = sid
-	}
-
+	b = append([]byte{0}, b...)
+	l.Label = binary.BigEndian.Uint32(b)
 	return nil
 }
 
-func (s *BaseSID) serialize() []byte {
-	b := make([]byte, 4)
-	if s.Value {
-		b[0] += 128
+func (l *SIDIndexLabelLabel) serialize() ([]byte, error) {
+	if l.Label > maxUint24 {
+		return nil, errors.New("label overflows 3 octets")
 	}
-	if s.Local {
-		b[0] += 64
-	}
-	b[1] = s.Weight
 
-	switch v := s.Variable.(type) {
-	case *SIDLabel:
-		c := make([]byte, 4)
-		binary.BigEndian.PutUint32(c, v.Label)
-		c = c[1:]
-		b = append(b, c...)
-	case *SRGBOffset:
-		c := make([]byte, 4)
-		binary.BigEndian.PutUint32(c, v.Offset)
-		b = append(b, c...)
-	case *IPv6SID:
-		b = append(b, v.Address...)
+	b := make([]byte, 4)
+	binary.BigEndian.PutUint32(b, l.Label)
+	return b[1:], nil
+}
+
+func deserializeSIDIndexLabel(b []byte) (SIDIndexLabel, error) {
+	switch len(b) {
+	case 3:
+		sil := &SIDIndexLabelLabel{}
+		err := sil.deserialize(b)
+		return sil, err
+	case 4:
+		sil := &SIDIndexLabelOffset{}
+		err := sil.deserialize(b)
+		return sil, err
+	case 16:
+		sil := &SIDIndexLabelIPv6Address{}
+		err := sil.deserialize(b)
+		return sil, err
+	default:
+		return nil, &errWithNotification{
+			error:   errors.New("invalid length for SIDIndexLabel"),
+			code:    NotifErrCodeUpdateMessage,
+			subcode: NotifErrSubcodeMalformedAttr,
+		}
+	}
+}
+
+// SIDIndexLabelOffset represents an offset is contained in a SIDIndexLabel.
+type SIDIndexLabelOffset struct {
+	Offset uint32
+}
+
+// Type returns the appropriate SIDIndexLabelType for SIDIndexLabelOffset
+func (l *SIDIndexLabelOffset) Type() SIDIndexLabelType {
+	return SIDIndexLabelTypeOffset
+}
+
+func (l *SIDIndexLabelOffset) deserialize(b []byte) error {
+	if len(b) != 4 {
+		return &errWithNotification{
+			error:   errors.New("invalid length for SIDIndexLabelLabel"),
+			code:    NotifErrCodeUpdateMessage,
+			subcode: NotifErrSubcodeMalformedAttr,
+		}
+	}
+
+	l.Offset = binary.BigEndian.Uint32(b)
+	return nil
+}
+
+func (l *SIDIndexLabelOffset) serialize() ([]byte, error) {
+	b := make([]byte, 4)
+	binary.BigEndian.PutUint32(b, l.Offset)
+	return b, nil
+}
+
+// SIDIndexLabelIPv6Address is an IPv6 address contained in a SIDIndexLabel.
+type SIDIndexLabelIPv6Address struct {
+	Address net.IP
+}
+
+// Type returns the appropriate SIDIndexLabelType for SIDIndexLabelIPv6Address
+func (l *SIDIndexLabelIPv6Address) Type() SIDIndexLabelType {
+	return SIDIndexLabelTypeIPv6Address
+}
+
+func (l *SIDIndexLabelIPv6Address) deserialize(b []byte) error {
+	addr, err := deserializeIPv6Addr(b)
+	if err != nil {
+		return err
+	}
+
+	l.Address = addr
+	return nil
+}
+
+func (l *SIDIndexLabelIPv6Address) serialize() ([]byte, error) {
+	addr := l.Address.To16()
+	if addr == nil {
+		return nil, errors.New("invalid address")
+	}
+
+	return addr, nil
+}
+
+// LinkAttrAdjSIDFlagsType describes the type of LinkAttrAdjSIDFlags
+type LinkAttrAdjSIDFlagsType uint8
+
+// LinkAttrAdjSIDFlags values
+const (
+	LinkAttrAdjSIDFlagsTypeIsIs LinkAttrAdjSIDFlagsType = iota
+	LinkAttrAdjSIDFlagsTypeOspf
+)
+
+// LinkAttrAdjSIDFlags are contained in the LinkAttrAdjSID link attribute.
+type LinkAttrAdjSIDFlags interface {
+	Type() LinkAttrAdjSIDFlagsType
+	serialize() byte
+}
+
+// LinkAttrAdjSIDFlagsIsIs are contained in the LinkAttrAdjSID link attribute.
+//
+// https://tools.ietf.org/html/draft-ietf-isis-segment-routing-extensions-15#section-2.2.1
+type LinkAttrAdjSIDFlagsIsIs struct {
+	AddressFamily bool
+	Backup        bool
+	Value         bool
+	Local         bool
+	Set           bool
+	Persistent    bool
+}
+
+// Type returns the appropriate LinkAttrAdjSIDFlagsType for LinkAttrAdjSIDFlagsIsIs
+func (l *LinkAttrAdjSIDFlagsIsIs) Type() LinkAttrAdjSIDFlagsType {
+	return LinkAttrAdjSIDFlagsTypeIsIs
+}
+
+func (l *LinkAttrAdjSIDFlagsIsIs) deserialize(b byte) {
+	l.AddressFamily = (b & 128) != 0
+	l.Backup = (b & 64) != 0
+	l.Value = (b & 32) != 0
+	l.Local = (b & 16) != 0
+	l.Set = (b & 8) != 0
+	l.Persistent = (b & 4) != 0
+}
+
+func (l *LinkAttrAdjSIDFlagsIsIs) serialize() byte {
+	var b uint8
+	if l.AddressFamily {
+		b += 128
+	}
+	if l.Backup {
+		b += 64
+	}
+	if l.Value {
+		b += 32
+	}
+	if l.Local {
+		b += 16
+	}
+	if l.Set {
+		b += 8
+	}
+	if l.Persistent {
+		b += 4
 	}
 
 	return b
 }
 
-// LinkAttrPeerNodeSID is a link attributed contained a bgp-ls attribute
+// LinkAttrAdjSIDFlagsOspf are contained in the LinkAttrAdjSID link attribute.
+//
+// https://tools.ietf.org/html/draft-ietf-ospf-segment-routing-extensions-24#section-6.1
+type LinkAttrAdjSIDFlagsOspf struct {
+	Backup     bool
+	Value      bool
+	Local      bool
+	Group      bool
+	Persistent bool
+}
+
+// Type returns the appropriate LinkAttrAdjSIDFlagsType for LinkAttrAdjSIDFlagsOspf
+func (l *LinkAttrAdjSIDFlagsOspf) Type() LinkAttrAdjSIDFlagsType {
+	return LinkAttrAdjSIDFlagsTypeOspf
+}
+
+func (l *LinkAttrAdjSIDFlagsOspf) deserialize(b byte) {
+	l.Backup = (b & 128) != 0
+	l.Value = (b & 64) != 0
+	l.Local = (b & 32) != 0
+	l.Group = (b & 16) != 0
+	l.Persistent = (b & 8) != 0
+}
+
+func (l *LinkAttrAdjSIDFlagsOspf) serialize() byte {
+	var b uint8
+	if l.Backup {
+		b += 128
+	}
+	if l.Value {
+		b += 64
+	}
+	if l.Local {
+		b += 32
+	}
+	if l.Group {
+		b += 16
+	}
+	if l.Persistent {
+		b += 8
+	}
+	return b
+}
+
+func nlriProtocolIsOspf(nlriProtocol LinkStateNlriProtocolID) bool {
+	if nlriProtocol == LinkStateNlriOSPFv2ProtocolID || nlriProtocol == LinkStateNlriOSPFv3ProtocolID {
+		return true
+	}
+	return false
+}
+
+func nlriProtocolIsIsIs(nlriProtocol LinkStateNlriProtocolID) bool {
+	if nlriProtocol == LinkStateNlriIsIsL1ProtocolID || nlriProtocol == LinkStateNlriIsIsL2ProtocolID {
+		return true
+	}
+	return false
+}
+
+func deserializeLinkAttrAdjSIDFlags(b byte, nlriProtocol LinkStateNlriProtocolID) (LinkAttrAdjSIDFlags, error) {
+	if nlriProtocolIsOspf(nlriProtocol) {
+		flags := &LinkAttrAdjSIDFlagsOspf{}
+		flags.deserialize(b)
+		return flags, nil
+	} else if nlriProtocolIsIsIs(nlriProtocol) {
+		flags := &LinkAttrAdjSIDFlagsIsIs{}
+		flags.deserialize(b)
+		return flags, nil
+	} else {
+		return nil, &errWithNotification{
+			error:   errors.New("invalid nlri protocol"),
+			code:    NotifErrCodeUpdateMessage,
+			subcode: NotifErrSubcodeMalformedAttr,
+		}
+	}
+}
+
+// LinkAttrAdjSID is a link attribute contained in a bgp-ls attribute.
+//
+// https://tools.ietf.org/html/draft-ietf-idr-bgp-ls-segment-routing-ext-04#section-2.2.1
+type LinkAttrAdjSID struct {
+	Flags         LinkAttrAdjSIDFlags
+	Weight        uint8
+	SIDIndexLabel SIDIndexLabel
+}
+
+// Code returns the appropriate LinkAttrCode for LinkAttrCodeAdjSID.
+func (l *LinkAttrAdjSID) Code() LinkAttrCode {
+	return LinkAttrCodeAdjSID
+}
+
+func (l *LinkAttrAdjSID) deserialize(b []byte, nlriProtocol LinkStateNlriProtocolID) error {
+	if len(b) < 7 {
+		return &errWithNotification{
+			error:   errors.New("invalid length for LinkAttrAdjSID"),
+			code:    NotifErrCodeUpdateMessage,
+			subcode: NotifErrSubcodeMalformedAttr,
+		}
+	}
+
+	flags, err := deserializeLinkAttrAdjSIDFlags(b[0], nlriProtocol)
+	if err != nil {
+		return err
+	}
+	l.Flags = flags
+	l.Weight = b[1]
+
+	sil, err := deserializeSIDIndexLabel(b[4:])
+	if err != nil {
+		return err
+	}
+	l.SIDIndexLabel = sil
+	return nil
+}
+
+func (l *LinkAttrAdjSID) serialize() ([]byte, error) {
+	if l.SIDIndexLabel == nil {
+		return nil, errors.New("missing SIDIndexLabel")
+	}
+	if l.Flags == nil {
+		return nil, errors.New("missing flags")
+	}
+
+	sil, err := l.SIDIndexLabel.serialize()
+	if err != nil {
+		return nil, err
+	}
+
+	b := make([]byte, 8)
+	binary.BigEndian.PutUint16(b, uint16(l.Code()))
+	binary.BigEndian.PutUint16(b[2:], uint16(4+len(sil)))
+	b[4] = l.Flags.serialize()
+	b[5] = l.Weight
+	b = append(b, sil...)
+	return b, nil
+}
+
+// LinkAttrLanAdjSIDProtoSpecificID is contained in the LinkAttrLanAdjSID link
+// attribute.
+type LinkAttrLanAdjSIDProtoSpecificID interface {
+	Type() LinkAttrLanAdjSIDProtoSpecificIDType
+	deserialize(b []byte) error
+	serialize() []byte
+}
+
+// LinkAttrLanAdjSIDProtoSpecificIDType describes the type of LinkAttrLanAdjSIDProtoSpecificID.
+type LinkAttrLanAdjSIDProtoSpecificIDType uint8
+
+// LinkAttrLanAdjSIDProtoSpecificIDType values
+const (
+	LinkAttrLanAdjSIDProtoSpecificIDTypeIsIs LinkAttrLanAdjSIDProtoSpecificIDType = iota
+	LinkAttrLanAdjSIDProtoSpecificIDTypeOspf
+)
+
+// LinkAttrLanAdjSIDProtoSpecificIDOspf is contained in a LinkAttrLanAdjSID
+// link attribute.
+type LinkAttrLanAdjSIDProtoSpecificIDOspf struct {
+	NeighborID uint32
+}
+
+// Type returns the appropriate LinkAttrLanAdjSIDProtoSpecificIDType for
+// LinkAttrLanAdjSIDProtoSpecificIDOspf
+func (l *LinkAttrLanAdjSIDProtoSpecificIDOspf) Type() LinkAttrLanAdjSIDProtoSpecificIDType {
+	return LinkAttrLanAdjSIDProtoSpecificIDTypeOspf
+}
+
+func (l *LinkAttrLanAdjSIDProtoSpecificIDOspf) deserialize(b []byte) error {
+	if len(b) != 4 {
+		return &errWithNotification{
+			error:   errors.New("invalid length for LinkAttrLanAdjSIDProtoSpecificIDOspf"),
+			code:    NotifErrCodeUpdateMessage,
+			subcode: NotifErrSubcodeMalformedAttr,
+		}
+	}
+
+	l.NeighborID = binary.BigEndian.Uint32(b)
+	return nil
+}
+
+func (l *LinkAttrLanAdjSIDProtoSpecificIDOspf) serialize() []byte {
+	b := make([]byte, 4)
+	binary.BigEndian.PutUint32(b, l.NeighborID)
+	return b
+}
+
+// LinkAttrLanAdjSIDProtoSpecificIDIsIs is contained in a LinkAttrLanAdjSID
+// link attribute.
+type LinkAttrLanAdjSIDProtoSpecificIDIsIs struct {
+	SystemID [6]byte
+}
+
+// Type returns the appropriate LinkAttrLanAdjSIDProtoSpecificIDType for
+// LinkAttrLanAdjSIDProtoSpecificIDIsIs.
+func (l *LinkAttrLanAdjSIDProtoSpecificIDIsIs) Type() LinkAttrLanAdjSIDProtoSpecificIDType {
+	return LinkAttrLanAdjSIDProtoSpecificIDTypeIsIs
+}
+
+func (l *LinkAttrLanAdjSIDProtoSpecificIDIsIs) deserialize(b []byte) error {
+	if len(b) != 6 {
+		return &errWithNotification{
+			error:   errors.New("invalid length for LinkAttrLanAdjSIDProtoSpecificIDIsIs"),
+			code:    NotifErrCodeUpdateMessage,
+			subcode: NotifErrSubcodeMalformedAttr,
+		}
+	}
+
+	for i := 0; i < 6; i++ {
+		l.SystemID[i] = b[i]
+	}
+
+	return nil
+}
+
+func (l *LinkAttrLanAdjSIDProtoSpecificIDIsIs) serialize() []byte {
+	b := make([]byte, 6)
+	for i := 0; i < 6; i++ {
+		b[i] = l.SystemID[i]
+	}
+	return b
+}
+
+// LinkAttrLanAdjSID is a link attribute contained in a bgp-ls attribute.
+//
+// https://tools.ietf.org/html/draft-ietf-idr-bgp-ls-segment-routing-ext-04#section-2.2.2
+type LinkAttrLanAdjSID struct {
+	Flags              LinkAttrAdjSIDFlags
+	Weight             uint8
+	NeighborIDSystemID LinkAttrLanAdjSIDProtoSpecificID
+	SIDIndexLabel      SIDIndexLabel
+}
+
+// Code returns the appropriate LinkAttrCode for LinkAttrLanAdjSID
+func (l *LinkAttrLanAdjSID) Code() LinkAttrCode {
+	return LinkAttrCodeLanAdjSID
+}
+
+func (l *LinkAttrLanAdjSID) deserialize(b []byte, nlriProtocol LinkStateNlriProtocolID) error {
+	if len(b) < 11 {
+		return &errWithNotification{
+			error:   errors.New("invalid length for LinkAttrLanAdjSID"),
+			code:    NotifErrCodeUpdateMessage,
+			subcode: NotifErrSubcodeMalformedAttr,
+		}
+	}
+
+	flags, err := deserializeLinkAttrAdjSIDFlags(b[0], nlriProtocol)
+	if err != nil {
+		return err
+	}
+	l.Flags = flags
+	l.Weight = b[1]
+
+	if nlriProtocolIsOspf(nlriProtocol) {
+		id := &LinkAttrLanAdjSIDProtoSpecificIDOspf{}
+		err = id.deserialize(b[4:8])
+		if err != nil {
+			return err
+		}
+		l.NeighborIDSystemID = id
+		b = b[8:]
+	} else if nlriProtocolIsIsIs(nlriProtocol) {
+		id := &LinkAttrLanAdjSIDProtoSpecificIDIsIs{}
+		err = id.deserialize(b[4:10])
+		if err != nil {
+			return err
+		}
+		l.NeighborIDSystemID = id
+		b = b[10:]
+	}
+	// no need for else - deserializeLinkAttrAdjSIDFlags returns an err if nlri
+	// proto is invalid
+
+	sil, err := deserializeSIDIndexLabel(b)
+	if err != nil {
+		return err
+	}
+	l.SIDIndexLabel = sil
+	return nil
+}
+
+func (l *LinkAttrLanAdjSID) serialize() ([]byte, error) {
+	if l.Flags == nil {
+		return nil, errors.New("missing flags")
+	}
+	if l.NeighborIDSystemID == nil {
+		return nil, errors.New("missing neighbor/system ID")
+	}
+	if l.SIDIndexLabel == nil {
+		return nil, errors.New("missing SIDIndexLabel")
+	}
+
+	id := l.NeighborIDSystemID.serialize()
+
+	sil, err := l.SIDIndexLabel.serialize()
+	if err != nil {
+		return nil, err
+	}
+
+	b := make([]byte, 8)
+	binary.BigEndian.PutUint16(b, uint16(l.Code()))
+	binary.BigEndian.PutUint16(b[2:], uint16(4+len(id)+len(sil)))
+	b[4] = l.Flags.serialize()
+	b[5] = l.Weight
+
+	b = append(b, id...)
+	b = append(b, sil...)
+	return b, nil
+}
+
+// LinkAttrPeerNodeSID is a link attribute contained a bgp-ls attribute.
 //
 // https://tools.ietf.org/html/draft-ietf-idr-bgpls-segment-routing-epe-14#section-4.4
 type LinkAttrPeerNodeSID struct {
-	BaseSID
+	Weight        uint8
+	SIDIndexLabel SIDIndexLabel
 }
 
-// Code returns the appropriate LinkAttrCode for LinkAttrPeerNodeSID
+// Code returns the appropriate LinkAttrCode for LinkAttrPeerNodeSID.
 func (l *LinkAttrPeerNodeSID) Code() LinkAttrCode {
 	return LinkAttrCodePeerNodeSID
 }
 
 func (l *LinkAttrPeerNodeSID) deserialize(b []byte) error {
-	return l.BaseSID.deserialize(b)
+	if len(b) < 7 {
+		return &errWithNotification{
+			error:   errors.New("invalid length for LinkAttrPeerNodeSID"),
+			code:    NotifErrCodeUpdateMessage,
+			subcode: NotifErrSubcodeMalformedAttr,
+		}
+	}
+
+	l.Weight = b[1]
+	sil, err := deserializeSIDIndexLabel(b[4:])
+	if err != nil {
+		return err
+	}
+	l.SIDIndexLabel = sil
+	return nil
 }
 
 func (l *LinkAttrPeerNodeSID) serialize() ([]byte, error) {
-	b := l.BaseSID.serialize()
+	if l.SIDIndexLabel == nil {
+		return nil, errors.New("missing SIDIndexLabel")
+	}
 
-	c := make([]byte, 4)
-	binary.BigEndian.PutUint16(c[:2], uint16(l.Code()))
-	binary.BigEndian.PutUint16(c[2:], uint16(len(b)))
-	c = append(c, b...)
+	sil, err := l.SIDIndexLabel.serialize()
+	if err != nil {
+		return nil, err
+	}
 
-	return c, nil
+	b := make([]byte, 8)
+	binary.BigEndian.PutUint16(b, uint16(l.Code()))
+	binary.BigEndian.PutUint16(b[2:], uint16(4+len(sil)))
+	b[5] = l.Weight
+	b = append(b, sil...)
+	return b, nil
 }
 
-// LinkAttrPeerAdjSID is a link attributed contained a bgp-ls attribute
+// LinkAttrPeerAdjSID is a link attribute contained a bgp-ls attribute.
 //
 // https://tools.ietf.org/html/draft-ietf-idr-bgpls-segment-routing-epe-14#section-4.4
 type LinkAttrPeerAdjSID struct {
-	BaseSID
+	Value         bool
+	Local         bool
+	Weight        uint8
+	SIDIndexLabel SIDIndexLabel
 }
 
 // Code returns the appropriate LinkAttrCode for LinkAttrPeerAdjSID
@@ -1754,25 +2717,56 @@ func (l *LinkAttrPeerAdjSID) Code() LinkAttrCode {
 }
 
 func (l *LinkAttrPeerAdjSID) deserialize(b []byte) error {
-	return l.BaseSID.deserialize(b)
+	if len(b) < 7 {
+		return &errWithNotification{
+			error:   errors.New("invalid length for LinkAttrPeerAdjSID"),
+			code:    NotifErrCodeUpdateMessage,
+			subcode: NotifErrSubcodeMalformedAttr,
+		}
+	}
+
+	l.Value = (b[0] & 128) != 0
+	l.Local = (b[0] & 64) != 0
+	l.Weight = b[1]
+	sil, err := deserializeSIDIndexLabel(b[4:])
+	if err != nil {
+		return err
+	}
+	l.SIDIndexLabel = sil
+	return nil
 }
 
 func (l *LinkAttrPeerAdjSID) serialize() ([]byte, error) {
-	b := l.BaseSID.serialize()
+	if l.SIDIndexLabel == nil {
+		return nil, errors.New("missing SIDIndexLabel")
+	}
 
-	c := make([]byte, 4)
-	binary.BigEndian.PutUint16(c[:2], uint16(l.Code()))
-	binary.BigEndian.PutUint16(c[2:], uint16(len(b)))
-	c = append(c, b...)
+	sil, err := l.SIDIndexLabel.serialize()
+	if err != nil {
+		return nil, err
+	}
 
-	return c, nil
+	b := make([]byte, 8)
+	binary.BigEndian.PutUint16(b, uint16(l.Code()))
+	binary.BigEndian.PutUint16(b[2:], uint16(4+len(sil)))
+
+	if l.Value {
+		b[4] += 128
+	}
+	if l.Local {
+		b[4] += 64
+	}
+	b[5] = l.Weight
+	b = append(b, sil...)
+	return b, nil
 }
 
 // LinkAttrPeerSetSID is a link attributed contained a bgp-ls attribute
 //
 // https://tools.ietf.org/html/draft-ietf-idr-bgpls-segment-routing-epe-14#section-4.4
 type LinkAttrPeerSetSID struct {
-	BaseSID
+	Weight        uint8
+	SIDIndexLabel SIDIndexLabel
 }
 
 // Code returns the appropriate LinkAttrCode for LinkAttrPeerSetSID
@@ -1781,25 +2775,499 @@ func (l *LinkAttrPeerSetSID) Code() LinkAttrCode {
 }
 
 func (l *LinkAttrPeerSetSID) deserialize(b []byte) error {
-	return l.BaseSID.deserialize(b)
+	if len(b) < 7 {
+		return &errWithNotification{
+			error:   errors.New("invalid length for LinkAttrPeerSetSID"),
+			code:    NotifErrCodeUpdateMessage,
+			subcode: NotifErrSubcodeMalformedAttr,
+		}
+	}
+
+	l.Weight = b[1]
+	sil, err := deserializeSIDIndexLabel(b[4:])
+	if err != nil {
+		return err
+	}
+	l.SIDIndexLabel = sil
+	return nil
 }
 
 func (l *LinkAttrPeerSetSID) serialize() ([]byte, error) {
-	b := l.BaseSID.serialize()
+	if l.SIDIndexLabel == nil {
+		return nil, errors.New("missing SIDIndexLabel")
+	}
+
+	sil, err := l.SIDIndexLabel.serialize()
+	if err != nil {
+		return nil, err
+	}
+
+	b := make([]byte, 8)
+	binary.BigEndian.PutUint16(b, uint16(l.Code()))
+	binary.BigEndian.PutUint16(b[2:], uint16(4+len(sil)))
+	b[5] = l.Weight
+	b = append(b, sil...)
+	return b, nil
+}
+
+func deserializeMicrosecondDelay(b []byte) (time.Duration, error) {
+	if len(b) != 3 {
+		return 0, &errWithNotification{
+			error:   errors.New("invalid length for delay value"),
+			code:    NotifErrCodeUpdateMessage,
+			subcode: NotifErrSubcodeMalformedAttr,
+		}
+	}
+
+	b = append([]byte{0}, b...)
+	return time.Duration(binary.BigEndian.Uint32(b)) * time.Microsecond, nil
+}
+
+func serializeMicrosecondDelay(d time.Duration) ([]byte, error) {
+	us := int64(d / time.Microsecond)
+	if us > maxUint24 {
+		return nil, errors.New("delay overflows 3 octets")
+	}
+	b := make([]byte, 4)
+	binary.BigEndian.PutUint32(b, uint32(us))
+	return b[1:], nil
+}
+
+// LinkAttrUniLinkDelay is a link attribute contained in a bgp-ls attribute.
+//
+// https://tools.ietf.org/html/draft-ietf-idr-te-pm-bgp-08#section-3.1
+type LinkAttrUniLinkDelay struct {
+	Anomalous bool
+	Delay     time.Duration
+}
+
+// Code returns the appropriate LinkAttrCode for LinkAttrUniLinkDelay
+func (l *LinkAttrUniLinkDelay) Code() LinkAttrCode {
+	return LinkAttrCodeUniLinkDelay
+}
+
+func (l *LinkAttrUniLinkDelay) deserialize(b []byte) error {
+	if len(b) != 4 {
+		return &errWithNotification{
+			error:   errors.New("invalid length for LinkAttrUniLinkDelay"),
+			code:    NotifErrCodeUpdateMessage,
+			subcode: NotifErrSubcodeMalformedAttr,
+		}
+	}
+
+	l.Anomalous = (b[0] & 128) != 0
+	delay, err := deserializeMicrosecondDelay(b[1:])
+	if err != nil {
+		return err
+	}
+	l.Delay = delay
+
+	return nil
+}
+
+func (l *LinkAttrUniLinkDelay) serialize() ([]byte, error) {
+	b := make([]byte, 5)
+	binary.BigEndian.PutUint16(b[:2], uint16(l.Code()))
+	binary.BigEndian.PutUint16(b[2:], uint16(4))
+	if l.Anomalous {
+		b[4] = 128
+	}
+
+	c, err := serializeMicrosecondDelay(l.Delay)
+	if err != nil {
+		return nil, err
+	}
+	b = append(b, c...)
+
+	return b, nil
+}
+
+// LinkAttrMinMaxUniLinkDelay is a link attribute contained in a bgp-ls attribute.
+//
+// https://tools.ietf.org/html/draft-ietf-idr-te-pm-bgp-08#section-3.2
+type LinkAttrMinMaxUniLinkDelay struct {
+	Anomalous bool
+	MinDelay  time.Duration
+	MaxDelay  time.Duration
+}
+
+// Code returns the appropriate LinkAttrCode for LinkAttrMinMaxUniLinkDelay
+func (l *LinkAttrMinMaxUniLinkDelay) Code() LinkAttrCode {
+	return LinkAttrCodeMinMaxUniLinkDelay
+}
+
+func (l *LinkAttrMinMaxUniLinkDelay) deserialize(b []byte) error {
+	if len(b) != 8 {
+		return &errWithNotification{
+			error:   errors.New("invalid length for LinkAttrMinMaxUniLinkDelay"),
+			code:    NotifErrCodeUpdateMessage,
+			subcode: NotifErrSubcodeMalformedAttr,
+		}
+	}
+
+	l.Anomalous = (b[0] & 128) != 0
+
+	delay, err := deserializeMicrosecondDelay(b[1:4])
+	if err != nil {
+		return err
+	}
+	l.MinDelay = delay
+
+	delay, err = deserializeMicrosecondDelay(b[5:8])
+	if err != nil {
+		return err
+	}
+	l.MaxDelay = delay
+
+	return nil
+}
+
+func (l *LinkAttrMinMaxUniLinkDelay) serialize() ([]byte, error) {
+	b := make([]byte, 5)
+	binary.BigEndian.PutUint16(b[:2], uint16(l.Code()))
+	binary.BigEndian.PutUint16(b[2:], uint16(8))
+
+	if l.Anomalous {
+		b[4] = 128
+	}
+
+	c, err := serializeMicrosecondDelay(l.MinDelay)
+	if err != nil {
+		return nil, err
+	}
+	b = append(b, c...)
+
+	c, err = serializeMicrosecondDelay(l.MaxDelay)
+	if err != nil {
+		return nil, err
+	}
+	b = append(b, 0)
+	b = append(b, c...)
+
+	return b, nil
+}
+
+// LinkAttrUniDelayVariation is a link attribute contained in a bgp-ls attribute.
+//
+// https://tools.ietf.org/html/draft-ietf-idr-te-pm-bgp-08#section-3.3
+type LinkAttrUniDelayVariation struct {
+	DelayVariation time.Duration
+}
+
+// Code returns the appropriate LinkAttrCode for LinkAttrUniDelayVariation
+func (l *LinkAttrUniDelayVariation) Code() LinkAttrCode {
+	return LinkAttrCodeUniDelayVariation
+}
+
+func (l *LinkAttrUniDelayVariation) deserialize(b []byte) error {
+	if len(b) != 4 {
+		return &errWithNotification{
+			error:   errors.New("invalid length for LinkAttrUniDelayVariation"),
+			code:    NotifErrCodeUpdateMessage,
+			subcode: NotifErrSubcodeMalformedAttr,
+		}
+	}
+
+	delay, err := deserializeMicrosecondDelay(b[1:])
+	if err != nil {
+		return err
+	}
+	l.DelayVariation = delay
+
+	return nil
+}
+
+func (l *LinkAttrUniDelayVariation) serialize() ([]byte, error) {
+	b := make([]byte, 5)
+	binary.BigEndian.PutUint16(b[:2], uint16(l.Code()))
+	binary.BigEndian.PutUint16(b[2:], uint16(4))
+
+	c, err := serializeMicrosecondDelay(l.DelayVariation)
+	if err != nil {
+		return nil, err
+	}
+	b = append(b, c...)
+
+	return b, nil
+}
+
+// LinkAttrUniPacketLoss is a link attribute contained in a bgp-ls attribute.
+//
+// https://tools.ietf.org/html/draft-ietf-idr-te-pm-bgp-08#section-3.4
+type LinkAttrUniPacketLoss struct {
+	Anomalous   bool
+	LossPercent float64
+}
+
+// Code returns the appropriate LinkAttrCode for LinkAttrUniPacketLoss
+func (l *LinkAttrUniPacketLoss) Code() LinkAttrCode {
+	return LinkAttrCodeUniPacketLoss
+}
+
+const packetLossUnit = 0.000003
+
+/*
+Link Loss: This 24-bit field carries link packet loss as a percentage
+of the total traffic sent over a configurable interval.  The basic
+unit is 0.000003%, where (2^24 - 2) is 50.331642%.  This value is the
+highest packet-loss percentage that can be expressed (the assumption
+being that precision is more important on high-speed links than the
+ability to advertise loss rates greater than this, and that high-
+speed links with over 50% loss are unusable).  Therefore, measured
+values that are larger than the field maximum SHOULD be encoded as
+the maximum value.
+*/
+func (l *LinkAttrUniPacketLoss) deserialize(b []byte) error {
+	if len(b) != 4 {
+		return &errWithNotification{
+			error:   errors.New("invalid length for LinkAttrUniPacketLoss"),
+			code:    NotifErrCodeUpdateMessage,
+			subcode: NotifErrSubcodeMalformedAttr,
+		}
+	}
+	l.Anomalous = (b[0] & 128) != 0
+
+	b = append([]byte{0}, b[1:]...)
+	l.LossPercent = float64(binary.BigEndian.Uint32(b)) * packetLossUnit
+
+	return nil
+}
+
+func (l *LinkAttrUniPacketLoss) serialize() ([]byte, error) {
+	b := make([]byte, 5)
+	binary.BigEndian.PutUint16(b, uint16(l.Code()))
+	binary.BigEndian.PutUint16(b[2:], uint16(4))
+	if l.Anomalous {
+		b[4] = 128
+	}
+
+	loss := uint32(l.LossPercent / packetLossUnit)
+	if loss > maxUint24 {
+		return nil, errors.New("loss percent overflows 3 octets")
+	}
+	if math.Mod(l.LossPercent, packetLossUnit) != 0 {
+		return nil, errors.New("invalid loss percent")
+	}
 
 	c := make([]byte, 4)
-	binary.BigEndian.PutUint16(c[:2], uint16(l.Code()))
-	binary.BigEndian.PutUint16(c[2:], uint16(len(b)))
-	c = append(c, b...)
+	binary.BigEndian.PutUint32(c, loss)
+	b = append(b, c[1:]...)
 
-	return c, nil
+	return b, nil
+}
+
+func deserializeFloat32(b []byte) (float32, error) {
+	if len(b) != 4 {
+		return 0, &errWithNotification{
+			error:   errors.New("invalid length for float32"),
+			code:    NotifErrCodeUpdateMessage,
+			subcode: NotifErrSubcodeMalformedAttr,
+		}
+	}
+
+	var f float32
+	buff := bytes.NewReader(b)
+	err := binary.Read(buff, binary.BigEndian, &f)
+	return f, err
+}
+
+func serializeFloat32(f float32) ([]byte, error) {
+	b := new(bytes.Buffer)
+	err := binary.Write(b, binary.BigEndian, f)
+	return b.Bytes(), err
+}
+
+// LinkAttrUniResidualBandwidth is a link attribute contained in a bgp-ls attribute.
+//
+// https://tools.ietf.org/html/draft-ietf-idr-te-pm-bgp-08#section-3.5
+type LinkAttrUniResidualBandwidth struct {
+	BytesPerSecond float32
+}
+
+// Code returns the appropriate LinkAttrCode for LinkAttrUniResidualBandwidth
+func (l *LinkAttrUniResidualBandwidth) Code() LinkAttrCode {
+	return LinkAttrCodeUniResidualBandwidth
+}
+
+func (l *LinkAttrUniResidualBandwidth) deserialize(b []byte) error {
+	if len(b) != 4 {
+		return &errWithNotification{
+			error:   errors.New("invalid length for LinkAttrUniResidualBandwidth"),
+			code:    NotifErrCodeUpdateMessage,
+			subcode: NotifErrSubcodeMalformedAttr,
+		}
+	}
+
+	f, err := deserializeFloat32(b)
+	if err != nil {
+		return err
+	}
+	l.BytesPerSecond = f
+
+	return nil
+}
+
+func (l *LinkAttrUniResidualBandwidth) serialize() ([]byte, error) {
+	b := make([]byte, 4)
+	binary.BigEndian.PutUint16(b, uint16(l.Code()))
+	binary.BigEndian.PutUint16(b[2:], uint16(4))
+
+	f, err := serializeFloat32(l.BytesPerSecond)
+	if err != nil {
+		return nil, err
+	}
+	b = append(b, f...)
+	return b, nil
+}
+
+// LinkAttrUniAvailableBandwidth is a link attribute contained in a bgp-ls attribute.
+//
+// https://tools.ietf.org/html/draft-ietf-idr-te-pm-bgp-08#section-3.6
+type LinkAttrUniAvailableBandwidth struct {
+	BytesPerSecond float32
+}
+
+// Code returns the appropriate LinkAttrCode for LinkAttrUniAvailableBandwidth
+func (l *LinkAttrUniAvailableBandwidth) Code() LinkAttrCode {
+	return LinkAttrCodeUniAvailableBandwidth
+}
+
+func (l *LinkAttrUniAvailableBandwidth) deserialize(b []byte) error {
+	if len(b) != 4 {
+		return &errWithNotification{
+			error:   errors.New("invalid length for LinkAttrUniAvailableBandwidth"),
+			code:    NotifErrCodeUpdateMessage,
+			subcode: NotifErrSubcodeMalformedAttr,
+		}
+	}
+
+	f, err := deserializeFloat32(b)
+	if err != nil {
+		return err
+	}
+	l.BytesPerSecond = f
+
+	return nil
+}
+
+func (l *LinkAttrUniAvailableBandwidth) serialize() ([]byte, error) {
+	b := make([]byte, 4)
+	binary.BigEndian.PutUint16(b, uint16(l.Code()))
+	binary.BigEndian.PutUint16(b[2:], uint16(4))
+
+	f, err := serializeFloat32(l.BytesPerSecond)
+	if err != nil {
+		return nil, err
+	}
+	b = append(b, f...)
+	return b, nil
+}
+
+// LinkAttrUniBandwidthUtil is a link attribute contained in a bgp-ls attribute.
+//
+// https://tools.ietf.org/html/draft-ietf-idr-te-pm-bgp-08#section-3.7
+type LinkAttrUniBandwidthUtil struct {
+	BytesPerSecond float32
+}
+
+// Code returns the appropriate LinkAttrCode for LinkAttrUniBandwidthUtil
+func (l *LinkAttrUniBandwidthUtil) Code() LinkAttrCode {
+	return LinkAttrCodeUniBandwidthUtil
+}
+
+func (l *LinkAttrUniBandwidthUtil) deserialize(b []byte) error {
+	if len(b) != 4 {
+		return &errWithNotification{
+			error:   errors.New("invalid length for LinkAttrUniBandwidthUtil"),
+			code:    NotifErrCodeUpdateMessage,
+			subcode: NotifErrSubcodeMalformedAttr,
+		}
+	}
+
+	f, err := deserializeFloat32(b)
+	if err != nil {
+		return err
+	}
+	l.BytesPerSecond = f
+
+	return nil
+}
+
+func (l *LinkAttrUniBandwidthUtil) serialize() ([]byte, error) {
+	b := make([]byte, 4)
+	binary.BigEndian.PutUint16(b, uint16(l.Code()))
+	binary.BigEndian.PutUint16(b[2:], uint16(4))
+
+	f, err := serializeFloat32(l.BytesPerSecond)
+	if err != nil {
+		return nil, err
+	}
+	b = append(b, f...)
+	return b, nil
+}
+
+// LinkAttrL2BundleMember is a link attribute contained in a bgp-ls attribute.
+//
+// https://tools.ietf.org/html/draft-ietf-idr-bgp-ls-segment-routing-ext-04#section-2.2.3
+type LinkAttrL2BundleMember struct {
+	MemberDescriptor uint32
+	LinkAttrs        []LinkAttr
+}
+
+// Code returns the appropriate LinkAttrCode for LinkAttrL2BundleMember
+func (l *LinkAttrL2BundleMember) Code() LinkAttrCode {
+	return LinkAttrCodeL2BundleMember
+}
+
+func (l *LinkAttrL2BundleMember) deserialize(b []byte, nlriProtocol LinkStateNlriProtocolID) error {
+	if len(b) < 8 {
+		return &errWithNotification{
+			error:   errors.New("invalid length for LinkAttrL2BundleMember"),
+			code:    NotifErrCodeUpdateMessage,
+			subcode: NotifErrSubcodeMalformedAttr,
+		}
+	}
+
+	l.MemberDescriptor = binary.BigEndian.Uint32(b)
+
+	node, link, prefix, err := deserializeLinkStateAttrs(b[4:], nlriProtocol)
+	if err != nil {
+		return err
+	}
+	if len(node) != 0 || len(prefix) != 0 {
+		return &errWithNotification{
+			error:   errors.New("invalid attributes found in LinkAttrL2BundleMember"),
+			code:    NotifErrCodeUpdateMessage,
+			subcode: NotifErrSubcodeMalformedAttr,
+		}
+	}
+
+	l.LinkAttrs = link
+	return nil
+}
+
+func (l *LinkAttrL2BundleMember) serialize() ([]byte, error) {
+	attrs := make([]byte, 0)
+	for _, a := range l.LinkAttrs {
+		b, err := a.serialize()
+		if err != nil {
+			return nil, err
+		}
+		attrs = append(attrs, b...)
+	}
+
+	b := make([]byte, 8)
+	binary.BigEndian.PutUint16(b, uint16(l.Code()))
+	binary.BigEndian.PutUint16(b[2:], uint16(4+len(attrs)))
+	binary.BigEndian.PutUint32(b[4:], l.MemberDescriptor)
+	b = append(b, attrs...)
+	return b, nil
 }
 
 // PrefixAttr is a prefix attribute contained in a bgp-ls attribute.
 type PrefixAttr interface {
 	Code() PrefixAttrCode
 	serialize() ([]byte, error)
-	deserialize(b []byte) error
 }
 
 // PrefixAttrCode describes the type of prefix attribute contained in a bgp-ls attribute.
@@ -1815,6 +3283,10 @@ const (
 	PrefixAttrCodePrefixMetric          PrefixAttrCode = 1155
 	PrefixAttrCodeOspfForwardingAddress PrefixAttrCode = 1156
 	PrefixAttrCodeOpaquePrefixAttribute PrefixAttrCode = 1157
+	PrefixAttrCodePrefixSID             PrefixAttrCode = 1158
+	PrefixAttrCodeRange                 PrefixAttrCode = 1159
+	PrefixAttrCodeFlags                 PrefixAttrCode = 1170
+	PrefixAttrCodeSourceRouterID        PrefixAttrCode = 1171
 )
 
 // PrefixAttrIgpFlags is a prefix attribute contained in a bgp-ls attribute.
@@ -2067,6 +3539,567 @@ func (p *PrefixAttrOpaquePrefixAttribute) serialize() ([]byte, error) {
 	binary.BigEndian.PutUint16(b[2:], uint16(len(p.Data)))
 	b = append(b, p.Data...)
 	return b, nil
+}
+
+// PrefixAttrPrefixSIDFlags are contained in a PrefixAttrPrefixSID prefix
+// attribute.
+type PrefixAttrPrefixSIDFlags interface {
+	Type() PrefixAttrPrefixSIDFlagsType
+	serialize() byte
+}
+
+// PrefixAttrPrefixSIDFlagsType describes the type of PrefixAttrPrefixSIDFlags
+// contained in a PrefixAttrPrefixSID prefix attribute.
+type PrefixAttrPrefixSIDFlagsType uint8
+
+// PrefixAttrPrefixSIDFlagsType values
+const (
+	PrefixAttrPrefixSIDFlagsTypeIsIs PrefixAttrPrefixSIDFlagsType = iota
+	PrefixAttrPrefixSIDFlagsTypeOspf
+)
+
+// PrefixAttrPrefixSIDFlagsIsIs are contained in a PrefixAttrPrefixSID prefix
+// attribute.
+//
+// https://tools.ietf.org/html/draft-ietf-isis-segment-routing-extensions-15#section-2.1
+type PrefixAttrPrefixSIDFlagsIsIs struct {
+	Readvertisement bool
+	NodeSID         bool
+	NoPHP           bool
+	ExplicitNull    bool
+	Value           bool
+	Local           bool
+}
+
+// Type returns the appropriate PrefixAttrPrefixSIDFlagsType for
+// PrefixAttrPrefixSIDFlagsIsIs.
+func (p *PrefixAttrPrefixSIDFlagsIsIs) Type() PrefixAttrPrefixSIDFlagsType {
+	return PrefixAttrPrefixSIDFlagsTypeIsIs
+}
+
+func (p *PrefixAttrPrefixSIDFlagsIsIs) deserialize(b byte) {
+	p.Readvertisement = (b & 128) != 0
+	p.NodeSID = (b & 64) != 0
+	p.NoPHP = (b & 32) != 0
+	p.ExplicitNull = (b & 16) != 0
+	p.Value = (b & 8) != 0
+	p.Local = (b & 4) != 0
+}
+
+func (p *PrefixAttrPrefixSIDFlagsIsIs) serialize() byte {
+	var b byte
+	if p.Readvertisement {
+		b += 128
+	}
+	if p.NodeSID {
+		b += 64
+	}
+	if p.NoPHP {
+		b += 32
+	}
+	if p.ExplicitNull {
+		b += 16
+	}
+	if p.Value {
+		b += 8
+	}
+	if p.Local {
+		b += 4
+	}
+	return b
+}
+
+// PrefixAttrPrefixSIDFlagsOspf are contained in a PrefixAttrPrefixSID prefix
+// attribute.
+//
+// https://tools.ietf.org/html/draft-ietf-ospf-segment-routing-extensions-24#section-5
+type PrefixAttrPrefixSIDFlagsOspf struct {
+	NoPHP         bool
+	MappingServer bool
+	ExplicitNull  bool
+	Value         bool
+	Local         bool
+}
+
+// Type returns the appropriate PrefixAttrPrefixSIDFlagsType for
+// PrefixAttrPrefixSIDFlagsOspf.
+func (p *PrefixAttrPrefixSIDFlagsOspf) Type() PrefixAttrPrefixSIDFlagsType {
+	return PrefixAttrPrefixSIDFlagsTypeOspf
+}
+
+func (p *PrefixAttrPrefixSIDFlagsOspf) deserialize(b byte) {
+	p.NoPHP = (b & 128) != 0
+	p.MappingServer = (b & 64) != 0
+	p.ExplicitNull = (b & 32) != 0
+	p.Value = (b & 16) != 0
+	p.Local = (b & 8) != 0
+}
+
+func (p *PrefixAttrPrefixSIDFlagsOspf) serialize() byte {
+	var b byte
+	if p.NoPHP {
+		b += 128
+	}
+	if p.MappingServer {
+		b += 64
+	}
+	if p.ExplicitNull {
+		b += 32
+	}
+	if p.Value {
+		b += 16
+	}
+	if p.Local {
+		b += 8
+	}
+	return b
+}
+
+// PrefixAttrPrefixSID is a prefix attribute contained in a bgp-ls attribute.
+//
+// https://tools.ietf.org/html/draft-ietf-idr-bgp-ls-segment-routing-ext-04#section-2.3.1
+type PrefixAttrPrefixSID struct {
+	Flags         PrefixAttrPrefixSIDFlags
+	Algorithm     uint8
+	SIDIndexLabel SIDIndexLabel
+}
+
+// Code returns the appropriate PrefixAttrCode for PrefixAttrPrefixSID
+func (p *PrefixAttrPrefixSID) Code() PrefixAttrCode {
+	return PrefixAttrCodePrefixSID
+}
+
+func (p *PrefixAttrPrefixSID) deserialize(b []byte, nlriProtocol LinkStateNlriProtocolID) error {
+	if len(b) < 7 {
+		return &errWithNotification{
+			error:   errors.New("invalid length for PrefixAttrPrefixSID"),
+			code:    NotifErrCodeUpdateMessage,
+			subcode: NotifErrSubcodeMalformedAttr,
+		}
+	}
+
+	if nlriProtocolIsIsIs(nlriProtocol) {
+		flags := &PrefixAttrPrefixSIDFlagsIsIs{}
+		flags.deserialize(b[0])
+		p.Flags = flags
+	} else if nlriProtocolIsOspf(nlriProtocol) {
+		flags := &PrefixAttrPrefixSIDFlagsOspf{}
+		flags.deserialize(b[0])
+		p.Flags = flags
+	} else {
+		return &errWithNotification{
+			error:   errors.New("invalid nlri protocol for PrefixAttrPrefixSID"),
+			code:    NotifErrCodeUpdateMessage,
+			subcode: NotifErrSubcodeMalformedAttr,
+		}
+	}
+	p.Algorithm = b[1]
+
+	sil, err := deserializeSIDIndexLabel(b[4:])
+	if err != nil {
+		return err
+	}
+	p.SIDIndexLabel = sil
+	return nil
+}
+
+func (p *PrefixAttrPrefixSID) serialize() ([]byte, error) {
+	if p.Flags == nil {
+		return nil, errors.New("missing flags")
+	}
+	if p.SIDIndexLabel == nil {
+		return nil, errors.New("missing SIDIndexLabel")
+	}
+
+	sil, err := p.SIDIndexLabel.serialize()
+	if err != nil {
+		return nil, err
+	}
+
+	b := make([]byte, 8)
+	binary.BigEndian.PutUint16(b, uint16(p.Code()))
+	binary.BigEndian.PutUint16(b[2:], uint16(4+len(sil)))
+	b[4] = p.Flags.serialize()
+	b[5] = p.Algorithm
+	b = append(b, sil...)
+
+	return b, nil
+}
+
+// PrefixAttrRangeFlags are contained in a PrefixAttrRange prefix attribute.
+type PrefixAttrRangeFlags interface {
+	Type() PrefixAttrRangeFlagsType
+	serialize() byte
+}
+
+// PrefixAttrRangeFlagsType describes the type of PrefixAttrRangeFlags.
+type PrefixAttrRangeFlagsType uint8
+
+// PrefixAttrRangeFlagsType values
+const (
+	PrefixAttrRangeFlagsTypeIsIs PrefixAttrRangeFlagsType = iota
+	PrefixAttrRangeFlagsTypeOspf
+)
+
+// PrefixAttrRangeFlagsIsIs are contained in a PrefixAttrRange prefix attribute.
+type PrefixAttrRangeFlagsIsIs struct {
+	AddressFamily bool
+	Mirror        bool
+	SFlag         bool
+	DFlag         bool
+	Attached      bool
+}
+
+func (p *PrefixAttrRangeFlagsIsIs) deserialize(b byte) {
+	p.AddressFamily = (b & 128) != 0
+	p.Mirror = (b & 64) != 0
+	p.SFlag = (b & 32) != 0
+	p.DFlag = (b & 16) != 0
+	p.Attached = (b & 8) != 0
+}
+
+func (p *PrefixAttrRangeFlagsIsIs) serialize() byte {
+	var b byte
+	if p.AddressFamily {
+		b += 128
+	}
+	if p.Mirror {
+		b += 64
+	}
+	if p.SFlag {
+		b += 32
+	}
+	if p.DFlag {
+		b += 16
+	}
+	if p.Attached {
+		b += 8
+	}
+	return b
+}
+
+// Type returns the appropriate PrefixAttrRangeFlagsType for
+// PrefixAttrRangeFlagsIsIs.
+func (p *PrefixAttrRangeFlagsIsIs) Type() PrefixAttrRangeFlagsType {
+	return PrefixAttrRangeFlagsTypeIsIs
+}
+
+// PrefixAttrRangeFlagsOspf are contained in a PrefixAttrRange prefix attribute.
+//
+// https://tools.ietf.org/html/draft-ietf-ospf-segment-routing-extensions-24#section-4
+type PrefixAttrRangeFlagsOspf struct {
+	InterArea bool
+}
+
+// Type returns the appropriate PrefixAttrRangeFlagsType for
+// PrefixAttrRangeFlagsOspf.
+func (p *PrefixAttrRangeFlagsOspf) Type() PrefixAttrRangeFlagsType {
+	return PrefixAttrRangeFlagsTypeOspf
+}
+
+func (p *PrefixAttrRangeFlagsOspf) deserialize(b byte) {
+	p.InterArea = (b & 128) != 0
+}
+
+func (p *PrefixAttrRangeFlagsOspf) serialize() byte {
+	var b byte
+	if p.InterArea {
+		b += 128
+	}
+	return b
+}
+
+// PrefixAttrRange is a prefix attribute contained in a bgp-ls attribute.
+//
+// https://tools.ietf.org/html/draft-ietf-idr-bgp-ls-segment-routing-ext-04#section-2.3.4
+type PrefixAttrRange struct {
+	Flags     PrefixAttrRangeFlags
+	RangeSize uint16
+	PrefixSID []*PrefixAttrPrefixSID
+}
+
+// Code returns the appropriate PrefixAttrCode for PrefixAttrRange
+func (p *PrefixAttrRange) Code() PrefixAttrCode {
+	return PrefixAttrCodeRange
+}
+
+func (p *PrefixAttrRange) deserialize(b []byte, nlriProtocol LinkStateNlriProtocolID) error {
+	if len(b) < 4 {
+		return &errWithNotification{
+			error:   errors.New("invalid length for PrefixAttrRange"),
+			code:    NotifErrCodeUpdateMessage,
+			subcode: NotifErrSubcodeMalformedAttr,
+		}
+	}
+
+	if nlriProtocolIsIsIs(nlriProtocol) {
+		flags := &PrefixAttrRangeFlagsIsIs{}
+		flags.deserialize(b[0])
+		p.Flags = flags
+	} else if nlriProtocolIsOspf(nlriProtocol) {
+		flags := &PrefixAttrRangeFlagsOspf{}
+		flags.deserialize(b[0])
+		p.Flags = flags
+	} else {
+		return &errWithNotification{
+			error:   errors.New("invalid nlri protocol"),
+			code:    NotifErrCodeUpdateMessage,
+			subcode: NotifErrSubcodeMalformedAttr,
+		}
+	}
+
+	p.RangeSize = binary.BigEndian.Uint16(b[2:])
+	b = b[4:]
+
+	if len(b) > 0 {
+		node, link, prefix, err := deserializeLinkStateAttrs(b, nlriProtocol)
+		if err != nil {
+			return err
+		}
+
+		if len(node) != 0 || len(link) != 0 {
+			return &errWithNotification{
+				error:   errors.New("invalid attrs in PrefixAttrRange"),
+				code:    NotifErrCodeUpdateMessage,
+				subcode: NotifErrSubcodeMalformedAttr,
+			}
+		}
+
+		if len(prefix) > 0 {
+			for _, a := range prefix {
+				b, ok := a.(*PrefixAttrPrefixSID)
+				if ok {
+					p.PrefixSID = append(p.PrefixSID, b)
+				} else {
+					return &errWithNotification{
+						error:   errors.New("invalid prefix attr in PrefixAttrRange"),
+						code:    NotifErrCodeUpdateMessage,
+						subcode: NotifErrSubcodeMalformedAttr,
+					}
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+func (p *PrefixAttrRange) serialize() ([]byte, error) {
+	if p.Flags == nil {
+		return nil, errors.New("missing flags")
+	}
+
+	psid := make([]byte, 0)
+	for _, a := range p.PrefixSID {
+		b, err := a.serialize()
+		if err != nil {
+			return nil, err
+		}
+		psid = append(psid, b...)
+	}
+
+	b := make([]byte, 8)
+	binary.BigEndian.PutUint16(b, uint16(p.Code()))
+	binary.BigEndian.PutUint16(b[2:], uint16(4+len(psid)))
+	b[4] = p.Flags.serialize()
+	binary.BigEndian.PutUint16(b[6:], p.RangeSize)
+	b = append(b, psid...)
+
+	return b, nil
+}
+
+// PrefixAttrFlagsOSPFv2 is a prefix attribute contained in a bgp-ls attribute.
+//
+// https://tools.ietf.org/html/draft-ietf-idr-bgp-ls-segment-routing-ext-04#section-2.3.2
+//
+// https://tools.ietf.org/html/rfc7684#section-2.1
+type PrefixAttrFlagsOSPFv2 struct {
+	Attach bool
+	Node   bool
+}
+
+// Code returns the appropriate PrefixAttrCode for PrefixAttrFlagsOSPFv2
+func (p *PrefixAttrFlagsOSPFv2) Code() PrefixAttrCode {
+	return PrefixAttrCodeFlags
+}
+
+func (p *PrefixAttrFlagsOSPFv2) deserialize(b []byte) error {
+	if len(b) != 1 {
+		return &errWithNotification{
+			error:   errors.New("invalid length for PrefixAttrFlagsOSPFv2"),
+			code:    NotifErrCodeUpdateMessage,
+			subcode: NotifErrSubcodeMalformedAttr,
+		}
+	}
+
+	p.Attach = (b[0] & 128) != 0
+	p.Node = (b[0] & 64) != 0
+	return nil
+}
+
+func (p *PrefixAttrFlagsOSPFv2) serialize() ([]byte, error) {
+	b := make([]byte, 5)
+	binary.BigEndian.PutUint16(b, uint16(p.Code()))
+	binary.BigEndian.PutUint16(b[2:], uint16(1))
+
+	if p.Attach {
+		b[4] += 128
+	}
+	if p.Node {
+		b[4] += 64
+	}
+	return b, nil
+}
+
+// PrefixAttrFlagsOSPFv3 is a prefix attribute contained in a bgp-ls attribute.
+//
+// https://tools.ietf.org/html/draft-ietf-idr-bgp-ls-segment-routing-ext-04#section-2.3.2
+//
+// https://tools.ietf.org/html/rfc5340#appendix-A.4.1.1
+type PrefixAttrFlagsOSPFv3 struct {
+	DN           bool
+	Propagate    bool
+	LocalAddress bool
+	NoUnicast    bool
+}
+
+// Code returns the appropriate PrefixAttrCode for PrefixAttrFlagsOSPFv3
+func (p *PrefixAttrFlagsOSPFv3) Code() PrefixAttrCode {
+	return PrefixAttrCodeFlags
+}
+
+func (p *PrefixAttrFlagsOSPFv3) deserialize(b []byte) error {
+	if len(b) != 1 {
+		return &errWithNotification{
+			error:   errors.New("invalid length for PrefixAttrFlagsOSPFv3"),
+			code:    NotifErrCodeUpdateMessage,
+			subcode: NotifErrSubcodeMalformedAttr,
+		}
+	}
+
+	p.DN = (b[0] & 16) != 0
+	p.Propagate = (b[0] & 8) != 0
+	p.LocalAddress = (b[0] & 2) != 0
+	p.NoUnicast = (b[0] & 1) != 0
+	return nil
+}
+
+func (p *PrefixAttrFlagsOSPFv3) serialize() ([]byte, error) {
+	b := make([]byte, 5)
+	binary.BigEndian.PutUint16(b, uint16(p.Code()))
+	binary.BigEndian.PutUint16(b[2:], uint16(1))
+
+	if p.DN {
+		b[4] += 16
+	}
+	if p.Propagate {
+		b[4] += 8
+	}
+	if p.LocalAddress {
+		b[4] += 2
+	}
+	if p.NoUnicast {
+		b[4]++
+	}
+
+	return b, nil
+}
+
+// PrefixAttrFlagsIsIs is a prefix attribute contained in a bgp-ls attribute.
+//
+// https://tools.ietf.org/html/draft-ietf-idr-bgp-ls-segment-routing-ext-04#section-2.3.2
+//
+// https://tools.ietf.org/html/rfc7794#section-2.1
+type PrefixAttrFlagsIsIs struct {
+	External        bool
+	Readvertisement bool
+	Node            bool
+}
+
+// Code returns the appropriate PrefixAttrCode for PrefixAttrFlagsIsIs
+func (p *PrefixAttrFlagsIsIs) Code() PrefixAttrCode {
+	return PrefixAttrCodeFlags
+}
+
+func (p *PrefixAttrFlagsIsIs) deserialize(b []byte) error {
+	if len(b) != 1 {
+		return &errWithNotification{
+			error:   errors.New("invalid length for PrefixAttrFlagsIsIs"),
+			code:    NotifErrCodeUpdateMessage,
+			subcode: NotifErrSubcodeMalformedAttr,
+		}
+	}
+
+	p.External = (b[0] & 128) != 0
+	p.Readvertisement = (b[0] & 64) != 0
+	p.Node = (b[0] & 32) != 0
+
+	return nil
+}
+
+func (p *PrefixAttrFlagsIsIs) serialize() ([]byte, error) {
+	b := make([]byte, 5)
+	binary.BigEndian.PutUint16(b, uint16(p.Code()))
+	binary.BigEndian.PutUint16(b[2:], uint16(1))
+
+	if p.External {
+		b[4] += 128
+	}
+	if p.Readvertisement {
+		b[4] += 64
+	}
+	if p.Node {
+		b[4] += 32
+	}
+	return b, nil
+}
+
+// PrefixAttrSourceRouterID is a prefix attribute contained in a bgp-ls attribute.
+//
+// https://tools.ietf.org/html/draft-ietf-idr-bgp-ls-segment-routing-ext-04#section-2.3.3
+type PrefixAttrSourceRouterID struct {
+	RouterID net.IP
+}
+
+// Code returns the appropriate PrefixAttrCode for PrefixAttrSourceRouterID
+func (p *PrefixAttrSourceRouterID) Code() PrefixAttrCode {
+	return PrefixAttrCodeSourceRouterID
+}
+
+func (p *PrefixAttrSourceRouterID) deserialize(b []byte) error {
+	switch len(b) {
+	case 4:
+		v4Addr, err := deserializeIPv4Addr(b)
+		if err != nil {
+			return err
+		}
+		p.RouterID = v4Addr
+	case 16:
+		v6Addr, err := deserializeIPv6Addr(b)
+		if err != nil {
+			return err
+		}
+		p.RouterID = v6Addr
+	default:
+		return &errWithNotification{
+			error:   errors.New("invalid length for PrefixAttrSourceRouterID"),
+			code:    NotifErrCodeUpdateMessage,
+			subcode: NotifErrSubcodeMalformedAttr,
+		}
+	}
+	return nil
+}
+
+func (p *PrefixAttrSourceRouterID) serialize() ([]byte, error) {
+	addr := p.RouterID.To4()
+	if addr == nil {
+		addr = p.RouterID.To16()
+		if addr == nil {
+			return nil, errors.New("invalid PrefixAttrSourceRouterID")
+		}
+		return serializeBgpLsIPv6TLV(uint16(p.Code()), addr)
+	}
+	return serializeBgpLsIPv4TLV(uint16(p.Code()), addr)
 }
 
 // PathAttrMpReach is a path attribute.
@@ -2361,6 +4394,7 @@ func (p *PathAttrMpUnreach) Type() PathAttrType {
 // LinkStateNlri contains nlri of link-state type.
 type LinkStateNlri interface {
 	Type() LinkStateNlriType
+	Protocol() LinkStateNlriProtocolID
 	Afi() MultiprotoAfi
 	Safi() MultiprotoSafi
 	serialize() ([]byte, error)
@@ -2411,6 +4445,11 @@ type LinkStateNlriNode struct {
 // Type returns the appropriate LinkStateNlriType for LinkStateNlriNode
 func (n *LinkStateNlriNode) Type() LinkStateNlriType {
 	return LinkStateNlriNodeType
+}
+
+// Protocol returns the appropriate LinkStateNlriProtocolID for LinkStateNlriNode
+func (n *LinkStateNlriNode) Protocol() LinkStateNlriProtocolID {
+	return n.ProtocolID
 }
 
 // Afi returns the appropriate MultiprotoAfi for LinkStateNlriNode
@@ -3324,6 +5363,11 @@ func (l *LinkStateNlriLink) Type() LinkStateNlriType {
 	return LinkStateNlriLinkType
 }
 
+// Protocol returns the appropriate LinkStateNlriProtocolID for LinkStateNlriLink
+func (l *LinkStateNlriLink) Protocol() LinkStateNlriProtocolID {
+	return l.ProtocolID
+}
+
 // Afi returns the appropriate MultiprotoAfi for LinkStateNlriLink
 func (l *LinkStateNlriLink) Afi() MultiprotoAfi {
 	return BgpLsAfi
@@ -3516,6 +5560,11 @@ type LinkStateNlriPrefix struct {
 	ID                   uint64
 	LocalNodeDescriptors []NodeDescriptor
 	PrefixDescriptors    []PrefixDescriptor
+}
+
+// Protocol returns the appropriate LinkStateNlriProtocolID for LinkStateNlriPrefix
+func (l *LinkStateNlriPrefix) Protocol() LinkStateNlriProtocolID {
+	return l.ProtocolID
 }
 
 // Afi returns the appropriate MultiprotoAfi for LinkStateNlriPrefix
