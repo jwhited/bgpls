@@ -4,17 +4,669 @@ import (
 	"encoding/binary"
 	"net"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
 
-func TestVariableSID(t *testing.T) {
-	l := &SIDLabel{}
-	assert.Equal(t, l.Type(), BaseSIDVariableTypeSIDLabel)
-	o := &SRGBOffset{}
-	assert.Equal(t, o.Type(), BaseSIDVariableTypeSRGBOffset)
-	i := &IPv6SID{}
-	assert.Equal(t, i.Type(), BaseSIDVariableTypeIPv6SID)
+func TestPrefixAttrSourceRouterID(t *testing.T) {
+	p := &PrefixAttrSourceRouterID{}
+	assert.Equal(t, p.Code(), PrefixAttrCodeSourceRouterID)
+
+	// invalid len
+	err := p.deserialize([]byte{})
+	assert.NotNil(t, err)
+
+	// v4
+	err = p.deserialize([]byte{1, 1, 1, 1})
+	assert.Nil(t, err)
+	_, err = p.serialize()
+	assert.Nil(t, err)
+
+	// v6
+	err = p.deserialize([]byte{1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1})
+	assert.Nil(t, err)
+	_, err = p.serialize()
+	assert.Nil(t, err)
+
+	// invalid addr
+	p.RouterID = nil
+	_, err = p.serialize()
+	assert.NotNil(t, err)
+}
+
+func TestPrefixAttrFlagsIsIs(t *testing.T) {
+	p := &PrefixAttrFlagsIsIs{}
+	assert.Equal(t, p.Code(), PrefixAttrCodeFlags)
+
+	// invalid len
+	err := p.deserialize([]byte{})
+	assert.NotNil(t, err)
+
+	err = p.deserialize([]byte{224})
+	assert.Nil(t, err)
+	assert.True(t, p.External)
+	assert.True(t, p.Readvertisement)
+	assert.True(t, p.Node)
+	b, err := p.serialize()
+	assert.Nil(t, err)
+	assert.Equal(t, b[4], uint8(224))
+}
+
+func TestPrefixAttrFlagsOSPFv3(t *testing.T) {
+	p := &PrefixAttrFlagsOSPFv3{}
+	assert.Equal(t, p.Code(), PrefixAttrCodeFlags)
+
+	// invalid len
+	err := p.deserialize([]byte{})
+	assert.NotNil(t, err)
+
+	err = p.deserialize([]byte{27})
+	assert.Nil(t, err)
+	assert.True(t, p.DN)
+	assert.True(t, p.Propagate)
+	assert.True(t, p.LocalAddress)
+	assert.True(t, p.NoUnicast)
+	b, err := p.serialize()
+	assert.Nil(t, err)
+	assert.Equal(t, b[4], uint8(27))
+}
+
+func TestPrefixAttrFlagsOSPFv2(t *testing.T) {
+	p := &PrefixAttrFlagsOSPFv2{}
+	assert.Equal(t, p.Code(), PrefixAttrCodeFlags)
+
+	// invalid len
+	err := p.deserialize([]byte{})
+	assert.NotNil(t, err)
+
+	err = p.deserialize([]byte{192})
+	assert.Nil(t, err)
+	assert.True(t, p.Attach)
+	assert.True(t, p.Node)
+	b, err := p.serialize()
+	assert.Nil(t, err)
+	assert.Equal(t, b[4], uint8(192))
+}
+
+func TestPrefixAttrRange(t *testing.T) {
+	p := &PrefixAttrRange{}
+
+	// invalid len
+	err := p.deserialize([]byte{}, 0)
+	assert.NotNil(t, err)
+
+	// isis flags
+	err = p.deserialize([]byte{0, 0, 0, 0}, LinkStateNlriIsIsL1ProtocolID)
+	assert.Nil(t, err)
+
+	// ospf flags
+	err = p.deserialize([]byte{0, 0, 0, 0}, LinkStateNlriOSPFv2ProtocolID)
+	assert.Nil(t, err)
+
+	// invalid nlri proto
+	err = p.deserialize([]byte{0, 0, 0, 0}, LinkStateNlriDirectProtocolID)
+	assert.NotNil(t, err)
+
+	// err deserializing attrs
+	err = p.deserialize([]byte{0, 0, 0, 0, 0}, LinkStateNlriIsIsL1ProtocolID)
+	assert.NotNil(t, err)
+
+	// invalid attrs
+	err = p.deserialize([]byte{0, 0, 0, 0, 1, 7, 0, 2, 0, 1}, LinkStateNlriIsIsL1ProtocolID)
+	assert.NotNil(t, err)
+
+	// invalid prefix attr
+	err = p.deserialize([]byte{0, 0, 0, 0, 4, 128, 0, 1, 1}, LinkStateNlriIsIsL1ProtocolID)
+	assert.NotNil(t, err)
+
+	// err serializing prefix sid
+	p.PrefixSID = []*PrefixAttrPrefixSID{
+		&PrefixAttrPrefixSID{
+			Flags: nil,
+		},
+	}
+	_, err = p.serialize()
+	assert.NotNil(t, err)
+
+	// nil flags
+	p.Flags = nil
+	_, err = p.serialize()
+	assert.NotNil(t, err)
+}
+
+func TestPrefixAttrRangeFlags(t *testing.T) {
+	i := &PrefixAttrRangeFlagsIsIs{}
+	assert.Equal(t, i.Type(), PrefixAttrRangeFlagsTypeIsIs)
+
+	i.deserialize(248)
+	assert.True(t, i.AddressFamily)
+	assert.True(t, i.Mirror)
+	assert.True(t, i.SFlag)
+	assert.True(t, i.DFlag)
+	assert.True(t, i.Attached)
+	assert.Equal(t, uint8(248), i.serialize())
+
+	o := &PrefixAttrRangeFlagsOspf{}
+	assert.Equal(t, o.Type(), PrefixAttrRangeFlagsTypeOspf)
+
+	o.deserialize(128)
+	assert.True(t, o.InterArea)
+	assert.Equal(t, uint8(128), o.serialize())
+}
+
+func TestPrefixAttrPrefixSID(t *testing.T) {
+	p := &PrefixAttrPrefixSID{}
+
+	// isis flags
+	err := p.deserialize([]byte{0, 0, 0, 0, 0, 0, 1}, LinkStateNlriIsIsL1ProtocolID)
+	assert.Nil(t, err)
+
+	// ospf flags
+	err = p.deserialize([]byte{0, 0, 0, 0, 0, 0, 1}, LinkStateNlriOSPFv2ProtocolID)
+	assert.Nil(t, err)
+
+	// invalid nlri proto
+	err = p.deserialize([]byte{0, 0, 0, 0, 0, 0, 1}, LinkStateNlriDirectProtocolID)
+	assert.NotNil(t, err)
+
+	// err deserializing SIDIndexLabel
+	err = p.deserialize([]byte{0, 0, 0, 0, 0, 0, 1, 0, 0}, LinkStateNlriIsIsL1ProtocolID)
+	assert.NotNil(t, err)
+
+	// err serializing SIDIndexLabel
+	p.SIDIndexLabel = &SIDIndexLabelLabel{
+		Label: 1 << 25,
+	}
+	_, err = p.serialize()
+	assert.NotNil(t, err)
+
+	// nil SIDIndexLabel
+	p.SIDIndexLabel = nil
+	_, err = p.serialize()
+	assert.NotNil(t, err)
+
+	// nil Flags
+	p.Flags = nil
+	_, err = p.serialize()
+	assert.NotNil(t, err)
+}
+
+func TestPrefixAttrPrefixSIDFlags(t *testing.T) {
+	i := &PrefixAttrPrefixSIDFlagsIsIs{}
+	assert.Equal(t, i.Type(), PrefixAttrPrefixSIDFlagsTypeIsIs)
+
+	i.deserialize(252)
+	assert.True(t, i.Readvertisement)
+	assert.True(t, i.NodeSID)
+	assert.True(t, i.NoPHP)
+	assert.True(t, i.ExplicitNull)
+	assert.True(t, i.Value)
+	assert.True(t, i.Local)
+	assert.Equal(t, uint8(252), i.serialize())
+
+	o := &PrefixAttrPrefixSIDFlagsOspf{}
+	assert.Equal(t, o.Type(), PrefixAttrPrefixSIDFlagsTypeOspf)
+
+	o.deserialize(248)
+	assert.True(t, o.NoPHP)
+	assert.True(t, o.MappingServer)
+	assert.True(t, o.ExplicitNull)
+	assert.True(t, o.Value)
+	assert.True(t, o.Local)
+	assert.Equal(t, uint8(248), o.serialize())
+}
+
+func TestLinkAttrL2BundleMember(t *testing.T) {
+	l := &LinkAttrL2BundleMember{}
+
+	// err deserializing attrs
+	err := l.deserialize([]byte{0, 0, 0, 0, 0, 0, 0, 0}, 0)
+	assert.NotNil(t, err)
+
+	// invalid attrs
+	err = l.deserialize([]byte{0, 0, 0, 0, 1, 7, 0, 2, 0, 1}, LinkStateNlriOSPFv2ProtocolID)
+	assert.NotNil(t, err)
+
+	// err serializing link attrs
+	l.LinkAttrs = append(l.LinkAttrs, &LinkAttrUniPacketLoss{
+		LossPercent: 1 << 25,
+	})
+	_, err = l.serialize()
+	assert.NotNil(t, err)
+}
+
+func TestFloat32Serialization(t *testing.T) {
+	// invalid len
+	_, err := deserializeFloat32([]byte{})
+	assert.NotNil(t, err)
+}
+
+func TestLinkAttrUniPacketLoss(t *testing.T) {
+	// overflows 3 octets
+	l := &LinkAttrUniPacketLoss{
+		LossPercent: 1 << 25,
+		Anomalous:   true,
+	}
+	_, err := l.serialize()
+	assert.NotNil(t, err)
+
+	// invalid loss percent
+	l.LossPercent = 1
+	_, err = l.serialize()
+	assert.NotNil(t, err)
+}
+
+func TestLinkAttrUniDelayVariation(t *testing.T) {
+	// overflows 3 octets
+	l := &LinkAttrUniDelayVariation{
+		DelayVariation: time.Microsecond * 1 << 25,
+	}
+	_, err := l.serialize()
+	assert.NotNil(t, err)
+}
+
+func TestLinkAttrMinMaxUniLinkDelay(t *testing.T) {
+	// overflows 3 octets
+	l := &LinkAttrMinMaxUniLinkDelay{
+		MaxDelay: time.Microsecond * 1 << 25,
+	}
+	_, err := l.serialize()
+	assert.NotNil(t, err)
+	l.MinDelay = time.Microsecond * 1 << 25
+	_, err = l.serialize()
+	assert.NotNil(t, err)
+}
+
+func TestLinkAttrUniLinkDelay(t *testing.T) {
+	// overflows 3 octets
+	l := &LinkAttrUniLinkDelay{
+		Delay: time.Microsecond * 1 << 25,
+	}
+	_, err := l.serialize()
+	assert.NotNil(t, err)
+}
+
+func TestMicrosecondDelaySerialization(t *testing.T) {
+	// invalid len
+	_, err := deserializeMicrosecondDelay([]byte{})
+	assert.NotNil(t, err)
+
+	// overflows 3 octets
+	_, err = serializeMicrosecondDelay(time.Microsecond * 1 << 25)
+	assert.NotNil(t, err)
+}
+
+func TestLinkAttrPeerSetSID(t *testing.T) {
+	l := &LinkAttrPeerSetSID{}
+
+	// invalid len
+	err := l.deserialize([]byte{})
+	assert.NotNil(t, err)
+
+	// err deserializing SIDIndexLabel
+	err = l.deserialize([]byte{0, 0, 0, 0, 0, 0, 0, 0, 0})
+	assert.NotNil(t, err)
+
+	// nil SIDIndexLabel
+	_, err = l.serialize()
+	assert.NotNil(t, err)
+
+	// err serializing SIDIndexLabel
+	l.SIDIndexLabel = &SIDIndexLabelLabel{
+		Label: 1 << 25,
+	}
+	_, err = l.serialize()
+	assert.NotNil(t, err)
+}
+
+func TestLinkAttrPeerAdjSID(t *testing.T) {
+	l := &LinkAttrPeerAdjSID{}
+
+	// invalid len
+	err := l.deserialize([]byte{})
+	assert.NotNil(t, err)
+
+	// err deserializing SIDIndexLabel
+	err = l.deserialize([]byte{0, 0, 0, 0, 0, 0, 0, 0, 0})
+	assert.NotNil(t, err)
+
+	// nil SIDIndexLabel
+	_, err = l.serialize()
+	assert.NotNil(t, err)
+
+	// err serializing SIDIndexLabel
+	l.SIDIndexLabel = &SIDIndexLabelLabel{
+		Label: 1 << 25,
+	}
+	_, err = l.serialize()
+	assert.NotNil(t, err)
+}
+
+func TestLinkAttrPeerNodeSID(t *testing.T) {
+	l := &LinkAttrPeerNodeSID{}
+
+	// invalid len
+	err := l.deserialize([]byte{})
+	assert.NotNil(t, err)
+
+	// err deserializing SIDIndexLabel
+	err = l.deserialize([]byte{0, 0, 0, 0, 0, 0, 0, 0, 0})
+	assert.NotNil(t, err)
+
+	// nil SIDIndexLabel
+	_, err = l.serialize()
+	assert.NotNil(t, err)
+
+	// err serializing SIDIndexLabel
+	l.SIDIndexLabel = &SIDIndexLabelLabel{
+		Label: 1 << 25,
+	}
+	_, err = l.serialize()
+	assert.NotNil(t, err)
+}
+
+func TestLinkAttrLanAdjSID(t *testing.T) {
+	l := &LinkAttrLanAdjSID{}
+
+	// invalid len
+	err := l.deserialize([]byte{}, 0)
+	assert.NotNil(t, err)
+
+	// invalid flags
+	err = l.deserialize([]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 0)
+	assert.NotNil(t, err)
+
+	// valid ospf id
+	err = l.deserialize([]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, LinkStateNlriOSPFv2ProtocolID)
+	assert.Nil(t, err)
+
+	// valid isis id
+	err = l.deserialize([]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, LinkStateNlriIsIsL1ProtocolID)
+	assert.Nil(t, err)
+
+	// err deserializing SIDIndexLabel
+	err = l.deserialize([]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, LinkStateNlriIsIsL1ProtocolID)
+	assert.NotNil(t, err)
+
+	// err serializing SIDIndexLabel
+	l.SIDIndexLabel = &SIDIndexLabelLabel{
+		Label: 1 << 25,
+	}
+	_, err = l.serialize()
+	assert.NotNil(t, err)
+
+	// nil SIDIndexLabel
+	l.SIDIndexLabel = nil
+	_, err = l.serialize()
+	assert.NotNil(t, err)
+
+	// nil NeighborIDSystemID
+	l.NeighborIDSystemID = nil
+	_, err = l.serialize()
+	assert.NotNil(t, err)
+
+	// nil flags
+	l.Flags = nil
+	_, err = l.serialize()
+	assert.NotNil(t, err)
+}
+
+func TestLinkAttrLanAdjSIDProtoSpecificID(t *testing.T) {
+	o := &LinkAttrLanAdjSIDProtoSpecificIDOspf{}
+	assert.Equal(t, o.Type(), LinkAttrLanAdjSIDProtoSpecificIDTypeOspf)
+
+	// invalid len
+	err := o.deserialize([]byte{})
+	assert.NotNil(t, err)
+
+	// valid id
+	err = o.deserialize([]byte{0, 0, 0, 1})
+	assert.Nil(t, err)
+
+	b := o.serialize()
+	assert.Equal(t, b, []byte{0, 0, 0, 1})
+
+	i := &LinkAttrLanAdjSIDProtoSpecificIDIsIs{}
+	assert.Equal(t, i.Type(), LinkAttrLanAdjSIDProtoSpecificIDTypeIsIs)
+
+	// invalid len
+	err = i.deserialize([]byte{})
+	assert.NotNil(t, err)
+
+	// valid id
+	err = i.deserialize([]byte{0, 0, 0, 0, 0, 1})
+	assert.Nil(t, err)
+
+	b = i.serialize()
+	assert.Equal(t, b, []byte{0, 0, 0, 0, 0, 1})
+}
+
+func TestLinkAttrAdjSID(t *testing.T) {
+	l := &LinkAttrAdjSID{}
+
+	// err deserializing flags
+	err := l.deserialize([]byte{0, 0, 0, 0, 0, 0, 0}, LinkStateNlriDirectProtocolID)
+	assert.NotNil(t, err)
+
+	// err deserializing SIDIndexLabel
+	err = l.deserialize([]byte{0, 0, 0, 0, 0, 0, 0, 0, 0}, LinkStateNlriOSPFv2ProtocolID)
+	assert.NotNil(t, err)
+
+	// missing SIDIndexLabel
+	_, err = l.serialize()
+	assert.NotNil(t, err)
+
+	// missing flags
+	l.Flags = nil
+	l.SIDIndexLabel = &SIDIndexLabelOffset{
+		Offset: 2,
+	}
+	_, err = l.serialize()
+	assert.NotNil(t, err)
+
+	// err serializing SIDIndexLabel
+	l.Flags = &LinkAttrAdjSIDFlagsOspf{}
+	l.SIDIndexLabel = &SIDIndexLabelLabel{
+		Label: 1 << 25,
+	}
+	_, err = l.serialize()
+	assert.NotNil(t, err)
+}
+
+func TestNlriProtocolIs(t *testing.T) {
+	for i := 1; i < 8; i++ {
+		proto := LinkStateNlriProtocolID(i)
+
+		b := nlriProtocolIsOspf(proto)
+		if proto == LinkStateNlriOSPFv2ProtocolID || proto == LinkStateNlriOSPFv3ProtocolID {
+			assert.True(t, b)
+		} else {
+			assert.False(t, b)
+		}
+
+		c := nlriProtocolIsIsIs(proto)
+		if proto == LinkStateNlriIsIsL1ProtocolID || proto == LinkStateNlriIsIsL2ProtocolID {
+			assert.True(t, c)
+		} else {
+			assert.False(t, c)
+		}
+	}
+
+}
+
+func TestLinkAttrAdjSIDFlags(t *testing.T) {
+	i := &LinkAttrAdjSIDFlagsIsIs{}
+	assert.Equal(t, i.Type(), LinkAttrAdjSIDFlagsTypeIsIs)
+
+	i.deserialize(252)
+	assert.True(t, i.AddressFamily)
+	assert.True(t, i.Backup)
+	assert.True(t, i.Value)
+	assert.True(t, i.Local)
+	assert.True(t, i.Set)
+	assert.True(t, i.Persistent)
+	assert.Equal(t, uint8(252), i.serialize())
+
+	o := &LinkAttrAdjSIDFlagsOspf{}
+	assert.Equal(t, o.Type(), LinkAttrAdjSIDFlagsTypeOspf)
+
+	o.deserialize(248)
+	assert.True(t, o.Backup)
+	assert.True(t, o.Value)
+	assert.True(t, o.Local)
+	assert.True(t, o.Group)
+	assert.True(t, o.Persistent)
+	assert.Equal(t, uint8(248), o.serialize())
+
+	// ospf flags
+	_, err := deserializeLinkAttrAdjSIDFlags(252, LinkStateNlriOSPFv2ProtocolID)
+	assert.Nil(t, err)
+
+	// isis flags
+	_, err = deserializeLinkAttrAdjSIDFlags(248, LinkStateNlriIsIsL1ProtocolID)
+	assert.Nil(t, err)
+
+	// invalid proto
+	_, err = deserializeLinkAttrAdjSIDFlags(248, LinkStateNlriDirectProtocolID)
+	assert.NotNil(t, err)
+}
+
+func TestSIDIndexLabel(t *testing.T) {
+	l := &SIDIndexLabelLabel{}
+	assert.Equal(t, l.Type(), SIDIndexLabelTypeLabel)
+
+	// invalid len
+	err := l.deserialize([]byte{})
+	assert.NotNil(t, err)
+
+	// overflow 3 octets
+	l.Label = 1 << 25
+	_, err = l.serialize()
+	assert.NotNil(t, err)
+
+	// invalid len
+	_, err = deserializeSIDIndexLabel([]byte{})
+	assert.NotNil(t, err)
+
+	o := &SIDIndexLabelOffset{}
+	assert.Equal(t, o.Type(), SIDIndexLabelTypeOffset)
+
+	// invalid len
+	err = o.deserialize([]byte{})
+	assert.NotNil(t, err)
+
+	v6 := &SIDIndexLabelIPv6Address{}
+	assert.Equal(t, v6.Type(), SIDIndexLabelTypeIPv6Address)
+
+	// err deserializing v6 addr
+	err = v6.deserialize([]byte{})
+	assert.NotNil(t, err)
+
+	// err serializing v6 addr
+	_, err = v6.serialize()
+	assert.NotNil(t, err)
+}
+
+func TestNodeAttrSRLocalBlock(t *testing.T) {
+	lb := &NodeAttrSRLocalBlock{
+		RangeSIDLabel: []RangeSIDLabel{
+			RangeSIDLabel{
+				RangeSize: 2,
+			},
+		},
+	}
+
+	// err serializing RangeSIDLabel
+	_, err := lb.serialize()
+	assert.NotNil(t, err)
+
+	// err deserializing RangeSIDLabel
+	err = lb.deserialize([]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0})
+	assert.NotNil(t, err)
+}
+
+func TestNodeAttrSRAlgo(t *testing.T) {
+	a := &NodeAttrSRAlgo{}
+
+	// empty algos
+	_, err := a.serialize()
+	assert.NotNil(t, err)
+}
+
+func TestNodeAttSRCaps(t *testing.T) {
+	caps := &NodeAttrSRCaps{
+		RangeSIDLabel: []RangeSIDLabel{
+			RangeSIDLabel{
+				RangeSize: 2,
+			},
+		},
+	}
+
+	// err serializing RangeSIDLabel
+	_, err := caps.serialize()
+	assert.NotNil(t, err)
+
+	// err deserializing RangeSIDLabel
+	err = caps.deserialize([]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0})
+	assert.NotNil(t, err)
+}
+
+func TestRangeSIDLabel(t *testing.T) {
+	r := &RangeSIDLabel{}
+
+	// missing SIDLabel
+	_, err := r.serialize()
+	assert.NotNil(t, err)
+
+	// err serializing SIDLabel
+	r.SIDLabel = &SIDLabelLabel{
+		Label: 1 << 25,
+	}
+	_, err = r.serialize()
+	assert.NotNil(t, err)
+
+	// overflow RangeSize
+	r.RangeSize = 1 << 25
+	_, err = r.serialize()
+	assert.NotNil(t, err)
+
+	// len < 10
+	_, err = deserializeRangeSIDLabel([]byte{0})
+	assert.NotNil(t, err)
+
+	// invalid sidLabelCode
+	_, err = deserializeRangeSIDLabel([]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0})
+	assert.NotNil(t, err)
+
+	// invalid sidLabel len field
+	_, err = deserializeRangeSIDLabel([]byte{0, 0, 0, 4, 137, 0, 100, 0, 0, 0})
+	assert.NotNil(t, err)
+
+	// invalid sidLabel len
+	_, err = deserializeRangeSIDLabel([]byte{0, 0, 0, 4, 137, 0, 5, 0, 0, 0, 0, 0})
+	assert.NotNil(t, err)
+}
+
+func TestSIDLabel(t *testing.T) {
+	l := &SIDLabelLabel{}
+	assert.Equal(t, l.Type(), SIDLabelTypeLabel)
+
+	// invalid len
+	err := l.deserialize([]byte{0})
+	assert.NotNil(t, err)
+
+	// overflow 3 octets
+	l.Label = 1 << 25
+	_, err = l.serialize()
+	assert.NotNil(t, err)
+
+	s := &SIDLabelSID{}
+	assert.Equal(t, s.Type(), SIDLabelTypeSID)
+
+	// invalid len
+	err = s.deserialize([]byte{0})
+	assert.NotNil(t, err)
 }
 
 func TestLinkStateNlriNode(t *testing.T) {
@@ -341,21 +993,7 @@ func TestIPTlvSerialization(t *testing.T) {
 	assert.NotNil(t, err)
 }
 
-func TestPathAttrLinkState(t *testing.T) {
-	ls := &PathAttrLinkState{}
-	assert.Equal(t, ls.Flags(), PathAttrFlags{})
-	assert.Equal(t, ls.Type(), PathAttrLinkStateType)
-	err := ls.deserialize(PathAttrFlags{}, []byte{})
-	assert.Nil(t, err)
-
-	// 0 > len < 4
-	err = ls.deserialize(PathAttrFlags{}, []byte{0})
-	assert.NotNil(t, err)
-
-	// invalid attr len
-	err = ls.deserialize(PathAttrFlags{}, []byte{0, 0, 0, 100, 0})
-	assert.NotNil(t, err)
-
+func TestDeserializeLinkStateAttrs(t *testing.T) {
 	// err on attr deserialization
 	cases := []struct {
 		a uint16
@@ -387,6 +1025,22 @@ func TestPathAttrLinkState(t *testing.T) {
 		},
 		{
 			uint16(NodeAttrCodeOpaqueNodeAttr),
+			[]byte{},
+		},
+		{
+			uint16(NodeAttrCodeSRCaps),
+			[]byte{},
+		},
+		{
+			uint16(NodeAttrCodeSRAlgo),
+			[]byte{},
+		},
+		{
+			uint16(NodeAttrCodeSRLocalBlock),
+			[]byte{},
+		},
+		{
+			uint16(NodeAttrCodeSRMSPref),
 			[]byte{},
 		},
 		{
@@ -443,15 +1097,55 @@ func TestPathAttrLinkState(t *testing.T) {
 		},
 		{
 			uint16(LinkAttrCodePeerNodeSID),
-			[]byte{0, 0, 0},
+			[]byte{},
 		},
 		{
 			uint16(LinkAttrCodePeerAdjSID),
-			[]byte{0, 0, 0},
+			[]byte{},
 		},
 		{
 			uint16(LinkAttrCodePeerSetSID),
-			[]byte{0, 0, 0},
+			[]byte{},
+		},
+		{
+			uint16(LinkAttrCodeAdjSID),
+			[]byte{},
+		},
+		{
+			uint16(LinkAttrCodeLanAdjSID),
+			[]byte{},
+		},
+		{
+			uint16(LinkAttrCodeUniLinkDelay),
+			[]byte{},
+		},
+		{
+			uint16(LinkAttrCodeMinMaxUniLinkDelay),
+			[]byte{},
+		},
+		{
+			uint16(LinkAttrCodeUniDelayVariation),
+			[]byte{},
+		},
+		{
+			uint16(LinkAttrCodeUniPacketLoss),
+			[]byte{},
+		},
+		{
+			uint16(LinkAttrCodeUniResidualBandwidth),
+			[]byte{},
+		},
+		{
+			uint16(LinkAttrCodeUniAvailableBandwidth),
+			[]byte{},
+		},
+		{
+			uint16(LinkAttrCodeUniBandwidthUtil),
+			[]byte{},
+		},
+		{
+			uint16(LinkAttrCodeL2BundleMember),
+			[]byte{},
 		},
 		{
 			uint16(PrefixAttrCodeIgpExtendedRouteTag),
@@ -478,6 +1172,22 @@ func TestPathAttrLinkState(t *testing.T) {
 			[]byte{0, 0, 0},
 		},
 		{
+			uint16(PrefixAttrCodePrefixSID),
+			[]byte{},
+		},
+		{
+			uint16(PrefixAttrCodeRange),
+			[]byte{},
+		},
+		{
+			uint16(PrefixAttrCodeFlags),
+			[]byte{},
+		},
+		{
+			uint16(PrefixAttrCodeSourceRouterID),
+			[]byte{},
+		},
+		{
 			uint16(0),
 			[]byte{0, 0, 0},
 		},
@@ -488,9 +1198,38 @@ func TestPathAttrLinkState(t *testing.T) {
 		binary.BigEndian.PutUint16(b[:2], uint16(c.a))
 		binary.BigEndian.PutUint16(b[2:], uint16(len(c.b)))
 		b = append(b, c.b...)
-		err = ls.deserialize(PathAttrFlags{}, b)
+		_, _, _, err := deserializeLinkStateAttrs(b, 0)
 		assert.NotNil(t, err)
 	}
+
+	// cases for PrefixAttrFlags with varying nlri protocol
+	protos := []LinkStateNlriProtocolID{
+		LinkStateNlriOSPFv2ProtocolID, LinkStateNlriOSPFv3ProtocolID,
+		LinkStateNlriIsIsL1ProtocolID, LinkStateNlriIsIsL2ProtocolID,
+	}
+	for _, p := range protos {
+		b := make([]byte, 4)
+		binary.BigEndian.PutUint16(b, uint16(PrefixAttrCodeFlags))
+		binary.BigEndian.PutUint16(b[2:], uint16(0))
+		_, _, _, err := deserializeLinkStateAttrs(b, p)
+		assert.NotNil(t, err)
+	}
+}
+
+func TestPathAttrLinkState(t *testing.T) {
+	ls := &PathAttrLinkState{}
+	assert.Equal(t, ls.Flags(), PathAttrFlags{})
+	assert.Equal(t, ls.Type(), PathAttrLinkStateType)
+	err := ls.deserialize(PathAttrFlags{}, []byte{}, 0)
+	assert.Nil(t, err)
+
+	// 0 > len < 4
+	err = ls.deserialize(PathAttrFlags{}, []byte{0}, 0)
+	assert.NotNil(t, err)
+
+	// invalid attr len
+	err = ls.deserialize(PathAttrFlags{}, []byte{0, 0, 0, 100, 0}, 0)
+	assert.NotNil(t, err)
 
 	// node attrs err on serialization
 	ls = &PathAttrLinkState{
@@ -721,172 +1460,6 @@ func TestUpdateSerialization(t *testing.T) {
 	binary.BigEndian.PutUint16(b[0:2], uint16(0))
 	binary.BigEndian.PutUint16(b[2:4], uint16(200))
 	err = u.deserialize(b)
-	assert.NotNil(t, err)
-}
-
-func TestPrefixAttrs(t *testing.T) {
-	attrs := []PrefixAttr{
-		&PrefixAttrIgpFlags{
-			IsIsDown: true,
-		},
-		&PrefixAttrIgpRouteTag{
-			Tags: []uint32{1, 2, 3},
-		},
-		&PrefixAttrIgpExtendedRouteTag{
-			Tags: []uint64{1, 2, 3},
-		},
-		&PrefixAttrPrefixMetric{
-			Metric: 1,
-		},
-		&PrefixAttrOspfForwardingAddress{
-			Address: net.ParseIP("1.1.1.1").To4(),
-		},
-	}
-
-	for _, a := range attrs {
-		b, err := a.serialize()
-		assert.Nil(t, err)
-		b = append(b, uint8(0))
-		err = a.deserialize(b)
-		assert.NotNil(t, err)
-	}
-
-	p := &PrefixAttrOpaquePrefixAttribute{}
-	_, err := p.serialize()
-	assert.NotNil(t, err)
-}
-
-func TestLinkAttrs(t *testing.T) {
-	var adminGroup [32]bool
-	adminGroup[31] = true
-
-	attrs := []LinkAttr{
-		&LinkAttrRemoteIPv4RouterID{
-			Address: net.ParseIP("1.1.1.1").To4(),
-		},
-		&LinkAttrRemoteIPv6RouterID{
-			Address: net.ParseIP("2601::").To16(),
-		},
-		&LinkAttrAdminGroup{
-			Group: adminGroup,
-		},
-		&LinkAttrMaxLinkBandwidth{
-			BytesPerSecond: 10000.00,
-		},
-		&LinkAttrMaxReservableLinkBandwidth{
-			BytesPerSecond: 20000.00,
-		},
-		&LinkAttrUnreservedBandwidth{
-			BytesPerSecond: [8]float32{0, 0, 1000.00, 0, 0, 0, 0, 0},
-		},
-		&LinkAttrTEDefaultMetric{
-			Metric: uint32(5),
-		},
-		&LinkAttrLinkProtectionType{
-			ExtraTraffic: true,
-		},
-		&LinkAttrPeerNodeSID{
-			BaseSID: BaseSID{
-				Value:  true,
-				Local:  true,
-				Weight: 1,
-				Variable: &SIDLabel{
-					Label: 50,
-				},
-			},
-		},
-		&LinkAttrPeerNodeSID{
-			BaseSID: BaseSID{
-				Value:  true,
-				Local:  true,
-				Weight: 1,
-				Variable: &SRGBOffset{
-					Offset: 50,
-				},
-			},
-		},
-		&LinkAttrPeerNodeSID{
-			BaseSID: BaseSID{
-				Value:  true,
-				Local:  true,
-				Weight: 1,
-				Variable: &IPv6SID{
-					Address: net.ParseIP("2601::"),
-				},
-			},
-		},
-		&LinkAttrPeerAdjSID{
-			BaseSID: BaseSID{
-				Value:  true,
-				Local:  true,
-				Weight: 1,
-				Variable: &SIDLabel{
-					Label: 50,
-				},
-			},
-		},
-		&LinkAttrPeerAdjSID{
-			BaseSID: BaseSID{
-				Value:  true,
-				Local:  true,
-				Weight: 1,
-				Variable: &SRGBOffset{
-					Offset: 50,
-				},
-			},
-		},
-		&LinkAttrPeerAdjSID{
-			BaseSID: BaseSID{
-				Value:  true,
-				Local:  true,
-				Weight: 1,
-				Variable: &IPv6SID{
-					Address: net.ParseIP("2601::"),
-				},
-			},
-		},
-		&LinkAttrPeerSetSID{
-			BaseSID: BaseSID{
-				Value:  true,
-				Local:  true,
-				Weight: 1,
-				Variable: &SIDLabel{
-					Label: 50,
-				},
-			},
-		},
-		&LinkAttrPeerSetSID{
-			BaseSID: BaseSID{
-				Value:  true,
-				Local:  true,
-				Weight: 1,
-				Variable: &SRGBOffset{
-					Offset: 50,
-				},
-			},
-		},
-		&LinkAttrPeerSetSID{
-			BaseSID: BaseSID{
-				Value:  true,
-				Local:  true,
-				Weight: 1,
-				Variable: &IPv6SID{
-					Address: net.ParseIP("2601::"),
-				},
-			},
-		},
-	}
-
-	for _, a := range attrs {
-		b, err := a.serialize()
-		assert.Nil(t, err)
-		b = append(b, uint8(0))
-		err = a.deserialize(b)
-		assert.NotNil(t, err)
-	}
-
-	l := &LinkAttrOpaqueLinkAttr{}
-	_, err := l.serialize()
 	assert.NotNil(t, err)
 }
 
@@ -1326,6 +1899,34 @@ func TestUpdateMessage(t *testing.T) {
 				&NodeAttrMultiTopologyID{
 					IDs: []uint16{1, 2, 3, 4},
 				},
+				&NodeAttrSRCaps{
+					MplsIPv4: true,
+					MplsIPv6: true,
+					RangeSIDLabel: []RangeSIDLabel{
+						RangeSIDLabel{
+							RangeSize: 1,
+							SIDLabel: &SIDLabelSID{
+								SID: 2,
+							},
+						},
+					},
+				},
+				&NodeAttrSRAlgo{
+					Algos: []uint8{1},
+				},
+				&NodeAttrSRLocalBlock{
+					RangeSIDLabel: []RangeSIDLabel{
+						RangeSIDLabel{
+							RangeSize: 1,
+							SIDLabel: &SIDLabelLabel{
+								Label: 2,
+							},
+						},
+					},
+				},
+				&NodeAttrSRMSPref{
+					Preference: 2,
+				},
 			},
 			LinkAttrs: []LinkAttr{
 				&LinkAttrRemoteIPv4RouterID{
@@ -1383,102 +1984,77 @@ func TestUpdateMessage(t *testing.T) {
 					Name: "test",
 				},
 				&LinkAttrPeerNodeSID{
-					BaseSID: BaseSID{
-						Value:  true,
-						Local:  true,
-						Weight: 1,
-						Variable: &SIDLabel{
-							Label: 50,
-						},
-					},
-				},
-				&LinkAttrPeerNodeSID{
-					BaseSID: BaseSID{
-						Value:  true,
-						Local:  true,
-						Weight: 1,
-						Variable: &SRGBOffset{
-							Offset: 50,
-						},
-					},
-				},
-				&LinkAttrPeerNodeSID{
-					BaseSID: BaseSID{
-						Value:  true,
-						Local:  true,
-						Weight: 1,
-						Variable: &IPv6SID{
-							Address: net.ParseIP("2601::"),
-						},
+					Weight: 2,
+					SIDIndexLabel: &SIDIndexLabelOffset{
+						Offset: 2,
 					},
 				},
 				&LinkAttrPeerAdjSID{
-					BaseSID: BaseSID{
-						Value:  true,
-						Local:  true,
-						Weight: 1,
-						Variable: &SIDLabel{
-							Label: 50,
-						},
-					},
-				},
-				&LinkAttrPeerAdjSID{
-					BaseSID: BaseSID{
-						Value:  true,
-						Local:  true,
-						Weight: 1,
-						Variable: &SRGBOffset{
-							Offset: 50,
-						},
-					},
-				},
-				&LinkAttrPeerAdjSID{
-					BaseSID: BaseSID{
-						Value:  true,
-						Local:  true,
-						Weight: 1,
-						Variable: &IPv6SID{
-							Address: net.ParseIP("2601::"),
-						},
-					},
-				},
-				&LinkAttrPeerAdjSID{
-					BaseSID: BaseSID{
-						Value:  true,
-						Local:  true,
-						Weight: 1,
-						Variable: &SIDLabel{
-							Label: 50,
-						},
-					},
-				},
-				&LinkAttrPeerAdjSID{
-					BaseSID: BaseSID{
-						Value:  true,
-						Local:  true,
-						Weight: 1,
-						Variable: &SRGBOffset{
-							Offset: 50,
-						},
-					},
-				},
-				&LinkAttrPeerAdjSID{
-					BaseSID: BaseSID{
-						Value:  true,
-						Local:  true,
-						Weight: 1,
-						Variable: &IPv6SID{
-							Address: net.ParseIP("2601::"),
-						},
+					Value:  true,
+					Local:  true,
+					Weight: 2,
+					SIDIndexLabel: &SIDIndexLabelIPv6Address{
+						Address: net.ParseIP("2601::1"),
 					},
 				},
 				&LinkAttrPeerSetSID{
-					BaseSID: BaseSID{
-						Value:  true,
-						Local:  true,
-						Weight: 1,
-						Variable: &IPv6SID{
-							Address: net.ParseIP("2601::"),
+					Weight: 2,
+					SIDIndexLabel: &SIDIndexLabelLabel{
+						Label: 2,
+					},
+				},
+				&LinkAttrAdjSID{
+					Flags: &LinkAttrAdjSIDFlagsOspf{
+						Backup:     true,
+						Value:      true,
+						Local:      true,
+						Group:      true,
+						Persistent: true,
+					},
+					Weight: 2,
+					SIDIndexLabel: &SIDIndexLabelLabel{
+						Label: 2,
+					},
+				},
+				&LinkAttrLanAdjSID{
+					Flags:  &LinkAttrAdjSIDFlagsOspf{},
+					Weight: 2,
+					NeighborIDSystemID: &LinkAttrLanAdjSIDProtoSpecificIDOspf{
+						NeighborID: 2,
+					},
+					SIDIndexLabel: &SIDIndexLabelLabel{
+						Label: 2,
+					},
+				},
+				&LinkAttrUniLinkDelay{
+					Anomalous: true,
+					Delay:     time.Second * 1,
+				},
+				&LinkAttrMinMaxUniLinkDelay{
+					Anomalous: true,
+					MinDelay:  time.Second * 1,
+					MaxDelay:  time.Second * 1,
+				},
+				&LinkAttrUniDelayVariation{
+					DelayVariation: time.Second * 1,
+				},
+				&LinkAttrUniPacketLoss{
+					LossPercent: packetLossUnit * 3,
+				},
+				&LinkAttrUniResidualBandwidth{
+					BytesPerSecond: 1000,
+				},
+				&LinkAttrUniAvailableBandwidth{
+					BytesPerSecond: 1000,
+				},
+				&LinkAttrUniBandwidthUtil{
+					BytesPerSecond: 1000,
+				},
+				&LinkAttrL2BundleMember{
+					MemberDescriptor: 2,
+					LinkAttrs: []LinkAttr{
+						&LinkAttrIgpMetric{
+							Metric: 2,
 						},
 					},
 				},
@@ -1507,6 +2083,47 @@ func TestUpdateMessage(t *testing.T) {
 				},
 				&PrefixAttrOpaquePrefixAttribute{
 					Data: []byte{1, 2, 3, 4},
+				},
+				&PrefixAttrPrefixSID{
+					Flags: &PrefixAttrPrefixSIDFlagsOspf{
+						NoPHP:         true,
+						MappingServer: true,
+						ExplicitNull:  true,
+						Value:         true,
+						Local:         true,
+					},
+					Algorithm: 2,
+					SIDIndexLabel: &SIDIndexLabelLabel{
+						Label: 2,
+					},
+				},
+				&PrefixAttrRange{
+					Flags: &PrefixAttrRangeFlagsOspf{
+						InterArea: true,
+					},
+					RangeSize: 2,
+					PrefixSID: []*PrefixAttrPrefixSID{
+						&PrefixAttrPrefixSID{
+							Flags: &PrefixAttrPrefixSIDFlagsOspf{
+								NoPHP:         true,
+								MappingServer: true,
+								ExplicitNull:  true,
+								Value:         true,
+								Local:         true,
+							},
+							Algorithm: 2,
+							SIDIndexLabel: &SIDIndexLabelLabel{
+								Label: 2,
+							},
+						},
+					},
+				},
+				&PrefixAttrFlagsOSPFv2{
+					Attach: true,
+					Node:   true,
+				},
+				&PrefixAttrSourceRouterID{
+					RouterID: net.ParseIP("172.16.1.1").To4(),
 				},
 			},
 		},
