@@ -4151,6 +4151,9 @@ func deserializeLinkStateNlri(afi MultiprotoAfi, safi MultiprotoSafi, b []byte) 
 		subcode: NotifErrSubcodeMalformedAttr,
 	}
 
+	if len(b) == 0 {
+		return nil, nil
+	}
 	if len(b) < 4 {
 		return nil, tooShortErr
 	}

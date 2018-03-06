@@ -22,12 +22,12 @@ type standardNeighbor struct {
 	c *NeighborConfig
 }
 
-func newNeighbor(localASN uint32, config *NeighborConfig, events chan Event) neighbor {
+func newNeighbor(routerID net.IP, localASN uint32, config *NeighborConfig, events chan Event) neighbor {
 	n := &standardNeighbor{
 		c: config,
 	}
 
-	n.fsm = newFSM(n.config(), events, localASN, 179)
+	n.fsm = newFSM(n.config(), events, routerID, localASN, 179)
 
 	return n
 }

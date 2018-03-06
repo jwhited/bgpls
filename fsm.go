@@ -74,6 +74,7 @@ type standardFSM struct {
 	events             chan Event
 	disable            chan interface{}
 	neighborConfig     *NeighborConfig
+	routerID           net.IP
 	localASN           uint32
 	conn               net.Conn
 	readerErr          chan error
@@ -92,12 +93,13 @@ type standardFSM struct {
 	*sync.Mutex
 }
 
-func newFSM(c *NeighborConfig, events chan Event, localASN uint32, port int) fsm {
+func newFSM(c *NeighborConfig, events chan Event, routerID net.IP, localASN uint32, port int) fsm {
 	f := &standardFSM{
 		port:              port,
 		events:            events,
 		disable:           make(chan interface{}),
 		neighborConfig:    c,
+		routerID:          routerID,
 		localASN:          localASN,
 		keepAliveTime:     time.Duration(int64(c.HoldTime) / 3).Truncate(time.Second),
 		keepAliveTimer:    time.NewTimer(0),
@@ -131,6 +133,8 @@ func (f *standardFSM) terminate() {
 func (f *standardFSM) dialNeighbor() {
 	dialer := &net.Dialer{}
 	ctx, cancel := context.WithCancel(context.Background())
+	f.outboundConnErr = make(chan error)
+	f.outboundConn = make(chan net.Conn)
 	f.cancelOutboundDial = cancel
 
 	go func() {
@@ -144,15 +148,15 @@ func (f *standardFSM) dialNeighbor() {
 	}()
 }
 
-func (f *standardFSM) idle() FSMState {
-	// initializes all BGP resources for the peer connection
+func (f *standardFSM) startReader() {
 	f.readerErr = make(chan error)
 	f.closeReader = make(chan struct{})
 	f.readerClosed = make(chan struct{})
 	f.msgCh = make(chan Message)
-	f.outboundConnErr = make(chan error)
-	f.outboundConn = make(chan net.Conn)
+	go f.read()
+}
 
+func (f *standardFSM) idle() FSMState {
 	// starts the ConnectRetryTimer with the initial value
 	f.connectRetryTimer.Reset(connectRetryTime)
 
@@ -202,7 +206,7 @@ Loop:
 			select {
 			case conn := <-f.outboundConn:
 				f.conn = conn
-				go f.read()
+				f.startReader()
 				break Loop
 			case <-f.outboundConnErr:
 			}
@@ -241,12 +245,12 @@ Loop:
 			*/
 			drainTimers(f.connectRetryTimer)
 			f.conn = conn
-			go f.read()
+			f.startReader()
 			break Loop
 		}
 	}
 
-	o, err := newOpenMessage(f.localASN, f.holdTime, f.neighborConfig.Address)
+	o, err := newOpenMessage(f.localASN, f.holdTime, f.routerID)
 	if err != nil {
 		f.cleanupConnAndReader()
 		return f.handleErr(fmt.Errorf("error creating open message: %v", err), IdleState)

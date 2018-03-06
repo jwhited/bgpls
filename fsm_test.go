@@ -105,7 +105,7 @@ func (s *fsmTestSuite) advanceToOpenSentState() {
 	}
 
 	s.events = make(chan Event)
-	s.fsm = newFSM(s.neighborConfig, s.events, 64512, i)
+	s.fsm = newFSM(s.neighborConfig, s.events, net.ParseIP("127.0.0.2").To4(), 64512, i)
 
 	s.failNowIfNotStateTransition(IdleState)
 	s.failNowIfNotStateTransition(ConnectState)

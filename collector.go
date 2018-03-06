@@ -95,7 +95,7 @@ func (c *standardCollector) AddNeighbor(config *NeighborConfig) error {
 		return errors.New("neighbor exists")
 	}
 
-	n := newNeighbor(c.config.ASN, config, c.events)
+	n := newNeighbor(c.config.RouterID, c.config.ASN, config, c.events)
 	c.neighbors[config.Address.String()] = n
 
 	return nil
