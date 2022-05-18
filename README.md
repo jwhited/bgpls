@@ -1,3 +1,5 @@
+# This repository has been deprecated in favor of [corebgp](github.com/jwhited/corebgp). Please consider using it instead.
+
 # bgpls [![Build Status](https://travis-ci.org/jwhited/bgpls.svg?branch=master)](https://travis-ci.org/jwhited/bgpls) [![GoDoc](https://godoc.org/github.com/jwhited/bgpls?status.svg)](https://godoc.org/github.com/jwhited/bgpls) [![codecov](https://codecov.io/gh/jwhited/bgpls/branch/master/graph/badge.svg)](https://codecov.io/gh/jwhited/bgpls)
 A BGP Link-State collector library for Go 1.9+.
 
